@@ -1,0 +1,3008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Life Simulator - The Real Adult Experience</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Courier New', monospace;
+      background: #e0e0e0;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%) skew(-5deg); opacity: 0; }
+      to { transform: translateX(0) skew(0deg); opacity: 1; }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.05) rotate(1deg); }
+    }
+    .notification {
+      animation: slideIn 0.3s ease-out;
+      transform: skew(-2deg);
+    }
+    .urgent {
+      animation: pulse 1s infinite;
+    }
+    
+    /* Make everything blocky and distorted */
+    button {
+      border: 3px solid black !important;
+      box-shadow: 5px 5px 0px rgba(0,0,0,0.8) !important;
+      transform: skew(-1deg) !important;
+      font-family: 'Courier New', monospace !important;
+      font-weight: bold !important;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    button:hover {
+      transform: skew(-1deg) translateY(-2px) !important;
+      box-shadow: 7px 7px 0px rgba(0,0,0,0.9) !important;
+    }
+    
+    input {
+      border: 4px solid black !important;
+      font-family: 'Courier New', monospace !important;
+      transform: skew(-1deg);
+    }
+    
+    .bg-white {
+      background: #f5f5f5 !important;
+      border: 3px solid #333 !important;
+      transform: rotate(-0.5deg);
+    }
+    
+    .rounded-xl, .rounded-lg, .rounded-3xl, .rounded-2xl {
+      border-radius: 2px !important;
+    }
+    
+    .shadow-lg, .shadow-xl {
+      box-shadow: 8px 8px 0px rgba(0,0,0,0.3) !important;
+    }
+    
+    /* Distort the gradients */
+    .bg-gradient-to-br, .bg-gradient-to-r {
+      background: repeating-linear-gradient(
+        45deg,
+        #667eea,
+        #667eea 10px,
+        #764ba2 10px,
+        #764ba2 20px
+      ) !important;
+    }
+    
+    /* Make bars chunky */
+    .h-2, .h-3 {
+      height: 15px !important;
+      border: 2px solid black;
+    }
+    
+    /* Misalign things slightly */
+    .grid {
+      gap: 10px !important;
+    }
+    
+    h1, h2, h3 {
+      font-family: 'Courier New', monospace !important;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      text-shadow: 3px 3px 0px rgba(0,0,0,0.2);
+    }
+    
+    /* Make cards look hand-drawn */
+    .border-2, .border-3 {
+      border-width: 4px !important;
+      border-style: solid !important;
+      border-color: #000 !important;
+    }
+    
+    /* Chunky progress bars */
+    .stat-fill, .w-full > div {
+      transition: none !important;
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // ==================== FINANCIAL CALCULATIONS ====================
+    
+    // Calculate federal income tax (simplified progressive brackets)
+    const calculateFederalTax = (annualIncome) => {
+      const brackets = [
+        { limit: 11000, rate: 0.10 },
+        { limit: 44725, rate: 0.12 },
+        { limit: 95375, rate: 0.22 },
+        { limit: 182100, rate: 0.24 },
+        { limit: 231250, rate: 0.32 },
+        { limit: 578125, rate: 0.35 },
+        { limit: Infinity, rate: 0.37 }
+      ];
+
+      let tax = 0;
+      let remainingIncome = annualIncome;
+      let previousLimit = 0;
+
+      for (let bracket of brackets) {
+        const taxableInBracket = Math.min(remainingIncome, bracket.limit - previousLimit);
+        if (taxableInBracket <= 0) break;
+        
+        tax += taxableInBracket * bracket.rate;
+        remainingIncome -= taxableInBracket;
+        previousLimit = bracket.limit;
+      }
+
+      return tax;
+    };
+
+    // Calculate state tax (simplified at 5%)
+    const calculateStateTax = (annualIncome) => {
+      return annualIncome * 0.05;
+    };
+
+    // Calculate Social Security (6.2% up to wage base)
+    const calculateSocialSecurity = (annualIncome) => {
+      const wageBase = 160200; // 2023 limit
+      return Math.min(annualIncome, wageBase) * 0.062;
+    };
+
+    // Calculate Medicare (1.45%)
+    const calculateMedicare = (annualIncome) => {
+      return annualIncome * 0.0145;
+    };
+
+    // Calculate monthly payment for loans/mortgages
+    const calculateMonthlyPayment = (principal, annualRate, months) => {
+      const monthlyRate = annualRate / 12;
+      if (monthlyRate === 0) return principal / months;
+      
+      return principal * (monthlyRate * Math.pow(1 + monthlyRate, months)) / 
+             (Math.pow(1 + monthlyRate, months) - 1);
+    };
+
+    // Calculate credit score impact
+    const calculateCreditScore = (onTimePayments, utilization, accountAge, hardInquiries, delinquencies) => {
+      let score = 300; // Base score
+      
+      // Payment history (35%)
+      score += (onTimePayments / 100) * 350 * 0.35;
+      
+      // Credit utilization (30%) - lower is better
+      score += ((100 - utilization) / 100) * 350 * 0.30;
+      
+      // Length of credit history (15%)
+      score += Math.min(accountAge / 120, 1) * 350 * 0.15; // Max at 10 years
+      
+      // New credit (10%) - hard inquiries hurt
+      score -= hardInquiries * 5;
+      
+      // Credit mix (10%) - simplified
+      score += 35;
+      
+      // Delinquencies hurt a lot
+      score -= delinquencies * 80;
+      
+      return Math.max(300, Math.min(850, Math.round(score)));
+    };
+
+    // ==================== MAIN GAME COMPONENT ====================
+    
+    const AdultLifeSimulator = () => {
+      // Player State
+      const [player, setPlayer] = useState({
+        name: '',
+        age: 18,
+        month: 1,
+        year: 2024,
+        
+        // Financial
+        checkingAccount: 2000,
+        savingsAccount: 500,
+        cash: 100,
+        monthlyIncome: 0,
+        yearToDateIncome: 0,
+        
+        // Employment
+        job: null,
+        hourlyWage: 0,
+        hoursPerWeek: 0,
+        unemploymentWeeks: 0,
+        
+        // Taxes & Withholding
+        federalWithholdingRate: 0.12,
+        stateWithholdingRate: 0.05,
+        taxesOwed: 0,
+        taxesPaid: 0,
+        lastFiledYear: 2023,
+        
+        // Retirement
+        has401k: false,
+        contributionPercent: 0,
+        retirement401k: 0,
+        employerMatch: 0,
+        rothIRA: 0,
+        
+        // Debt & Credit
+        creditScore: 650,
+        creditCards: [],
+        studentLoans: [],
+        carLoan: null,
+        mortgage: null,
+        
+        // Credit tracking
+        onTimePayments: 100,
+        creditUtilization: 0,
+        creditAccountAge: 0,
+        hardInquiries: 0,
+        delinquencies: 0,
+        
+        // Housing
+        housingType: 'apartment', // apartment, house, parents
+        monthlyRent: 1200,
+        homeValue: 0,
+        homeEquity: 0,
+        
+        // Transportation
+        hasCarOwned: false,
+        hasCarLease: false,
+        carValue: 0,
+        carPayment: 0,
+        
+        // Insurance
+        healthInsurance: false,
+        healthInsuranceCost: 0,
+        carInsurance: false,
+        carInsuranceCost: 0,
+        rentersInsurance: false,
+        rentersInsuranceCost: 15,
+        
+        // Utilities & Subscriptions
+        utilities: 150,
+        phoneInternet: 100,
+        subscriptions: [],
+        
+        // Living Expenses
+        groceriesPerMonth: 300,
+        diningOut: 0,
+        entertainment: 0,
+        transportation: 100, // gas/public transit
+        
+        // Health & Wellness
+        health: 100,
+        energy: 100,
+        stress: 20,
+        
+        // Life Events
+        hasEmergencyFund: false,
+        emergencyFundGoal: 6000,
+        
+        // Civic & Social Systems
+        civicEngagement: 0, // 0-100 scale
+        socialReputation: 50, // 0-100 scale
+        politicalInfluence: 0, // 0-100 scale
+        votingHistory: [], // track voting participation
+        lastVotedYear: 0,
+        registeredToVote: false,
+      });
+
+      const [gameStarted, setGameStarted] = useState(false);
+      const [currentScreen, setCurrentScreen] = useState('main'); // main, budget, taxes, debt, career, etc.
+      const [notifications, setNotifications] = useState([]);
+      const [gameSpeed, setGameSpeed] = useState(1); // 1 = real-time, 2 = fast, 0 = paused
+      const [showEvent, setShowEvent] = useState(null);
+      const [decisions, setDecisions] = useState([]);
+      const [achievements, setAchievements] = useState([]);
+      
+      // Home Menu & Practice Modes
+      const [homeMenuMode, setHomeMenuMode] = useState('main'); // main, taxPractice, cookingPractice
+      const [taxPracticeLevel, setTaxPracticeLevel] = useState(1);
+      const [cookingLevel, setCookingLevel] = useState(1);
+      const [cookingScore, setCookingScore] = useState({ taste: 0, price: 0, calories: 0 });
+      const [currentTaxProblem, setCurrentTaxProblem] = useState(null);
+      const [currentCookingChallenge, setCurrentCookingChallenge] = useState(null);
+      const [selectedIngredients, setSelectedIngredients] = useState([]);
+      const [taxAnswer, setTaxAnswer] = useState('');
+      const [showTaxResult, setShowTaxResult] = useState(false);
+      const [showCookingResult, setShowCookingResult] = useState(false);
+      
+      // Social & Civic Systems
+      const [npcs, setNpcs] = useState([]); // All NPCs player has met
+      const [socialBonds, setSocialBonds] = useState([]); // Relationships with NPCs
+      const [currentElection, setCurrentElection] = useState(null);
+      const [electionHistory, setElectionHistory] = useState([]);
+      const [politicalClimate, setPoliticalClimate] = useState({
+        economicSentiment: 50, // 0 = terrible, 100 = excellent
+        socialTension: 30, // 0 = peaceful, 100 = polarized
+        trustInGovernment: 40, // 0 = no trust, 100 = full trust
+      });
+
+      // Available Jobs
+      const [jobMarket] = useState([
+        { id: 'retail', title: 'Retail Associate', wage: 15, hours: 40, benefits: false, stability: 60 },
+        { id: 'server', title: 'Restaurant Server', wage: 8, hours: 35, tips: true, benefits: false, stability: 50 },
+        { id: 'delivery', title: 'Delivery Driver', wage: 18, hours: 40, benefits: false, stability: 55 },
+        { id: 'office', title: 'Office Assistant', wage: 20, hours: 40, benefits: true, stability: 75, match: 0.03 },
+        { id: 'teacher', title: 'Teacher', wage: 28, hours: 40, benefits: true, stability: 90, match: 0.05 },
+        { id: 'nurse', title: 'Registered Nurse', wage: 35, hours: 36, benefits: true, stability: 95, match: 0.06 },
+        { id: 'accountant', title: 'Accountant', wage: 32, hours: 40, benefits: true, stability: 85, match: 0.04 },
+        { id: 'engineer', title: 'Software Engineer', wage: 50, hours: 40, benefits: true, stability: 80, match: 0.06 },
+      ]);
+
+      // Game Loop - Monthly progression
+      useEffect(() => {
+        if (!gameStarted || gameSpeed === 0 || showEvent) return; // Pause when event modal is shown
+
+        const interval = setInterval(() => {
+          advanceMonth();
+        }, 5000 / gameSpeed); // 5 seconds per month (real-time)
+
+        return () => clearInterval(interval);
+      }, [gameStarted, gameSpeed, player, showEvent]);
+
+      // Advance to next month
+      const advanceMonth = () => {
+        setPlayer(prev => {
+          let newMonth = prev.month + 1;
+          let newYear = prev.year;
+          
+          if (newMonth > 12) {
+            newMonth = 1;
+            newYear += 1;
+            
+            // New year - tax filing time!
+            if (newYear > prev.lastFiledYear + 1) {
+              triggerTaxEvent();
+            }
+          }
+
+          // Calculate monthly income
+          let monthlyIncome = 0;
+          if (prev.job) {
+            const weeklyHours = prev.hoursPerWeek;
+            const weeksPerMonth = 4.33;
+            const grossMonthly = prev.hourlyWage * weeklyHours * weeksPerMonth;
+            
+            // Calculate paycheck deductions
+            const annualGross = grossMonthly * 12;
+            const federalWithholding = (calculateFederalTax(annualGross) / 12);
+            const stateWithholding = (calculateStateTax(annualGross) / 12);
+            const socialSecurity = (calculateSocialSecurity(annualGross) / 12);
+            const medicare = (calculateMedicare(annualGross) / 12);
+            
+            // 401k contribution
+            let retirement401kContribution = 0;
+            let employerMatchAmount = 0;
+            if (prev.has401k && prev.contributionPercent > 0) {
+              retirement401kContribution = grossMonthly * (prev.contributionPercent / 100);
+              if (prev.job.match) {
+                employerMatchAmount = Math.min(retirement401kContribution, grossMonthly * prev.job.match);
+              }
+            }
+            
+            // Health insurance premium
+            const healthPremium = prev.healthInsurance ? prev.healthInsuranceCost : 0;
+            
+            const totalDeductions = federalWithholding + stateWithholding + socialSecurity + 
+                                   medicare + retirement401kContribution + healthPremium;
+            
+            monthlyIncome = grossMonthly - totalDeductions;
+            
+            // Update retirement accounts
+            const new401k = prev.retirement401k + retirement401kContribution + employerMatchAmount;
+            
+            // Update year-to-date income and taxes paid
+            const newYearToDateIncome = newMonth === 1 ? grossMonthly : prev.yearToDateIncome + grossMonthly;
+            const newTaxesPaid = prev.taxesPaid + federalWithholding + stateWithholding;
+
+            // Calculate monthly expenses
+            const monthlyExpenses = calculateMonthlyExpenses(prev);
+            
+            // Update checking account
+            const newChecking = prev.checkingAccount + monthlyIncome - monthlyExpenses.total;
+
+            // Check if any bills are overdue
+            if (newChecking < 0) {
+              addNotification('⚠️ Overdraft! Your checking account is negative!', 'urgent');
+              // Overdraft fee
+              const overdraftFee = 35;
+              
+              // Update credit score for late payment
+              const newOnTimePayments = Math.max(0, prev.onTimePayments - 10);
+              const newDelinquencies = prev.delinquencies + 1;
+              
+              return {
+                ...prev,
+                month: newMonth,
+                year: newYear,
+                checkingAccount: newChecking - overdraftFee,
+                monthlyIncome,
+                yearToDateIncome: newYearToDateIncome,
+                taxesPaid: newTaxesPaid,
+                retirement401k: new401k,
+                stress: Math.min(100, prev.stress + 20),
+                onTimePayments: newOnTimePayments,
+                delinquencies: newDelinquencies,
+                creditScore: calculateCreditScore(newOnTimePayments, prev.creditUtilization, 
+                                                 prev.creditAccountAge, prev.hardInquiries, newDelinquencies)
+              };
+            }
+
+            // Pay credit cards minimum
+            let creditCardPayments = 0;
+            const updatedCreditCards = prev.creditCards.map(card => {
+              const minPayment = Math.max(25, card.balance * 0.02);
+              creditCardPayments += minPayment;
+              const interest = (card.balance * (card.apr / 100)) / 12;
+              return {
+                ...card,
+                balance: card.balance - minPayment + interest
+              };
+            });
+
+            // Calculate credit utilization
+            const totalLimit = prev.creditCards.reduce((sum, card) => sum + card.limit, 0);
+            const totalBalance = updatedCreditCards.reduce((sum, card) => sum + card.balance, 0);
+            const newUtilization = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : 0;
+
+            // Age credit accounts
+            const newAccountAge = prev.creditAccountAge + 1;
+
+            // Update credit score
+            const newCreditScore = calculateCreditScore(
+              prev.onTimePayments,
+              newUtilization,
+              newAccountAge,
+              prev.hardInquiries,
+              prev.delinquencies
+            );
+
+            // Random life events (10% chance per month)
+            if (Math.random() < 0.10) {
+              setTimeout(() => triggerRandomEvent(), 1000);
+            }
+
+            return {
+              ...prev,
+              month: newMonth,
+              year: newYear,
+              monthlyIncome,
+              yearToDateIncome: newYearToDateIncome,
+              taxesPaid: newTaxesPaid,
+              checkingAccount: newChecking - creditCardPayments,
+              retirement401k: new401k,
+              creditCards: updatedCreditCards,
+              creditUtilization: newUtilization,
+              creditAccountAge: newAccountAge,
+              creditScore: newCreditScore,
+              stress: Math.max(0, prev.stress - 2),
+              creditAccountAge: prev.creditAccountAge + 1
+            };
+          }
+
+          // Unemployed - expenses only
+          const monthlyExpenses = calculateMonthlyExpenses(prev);
+          return {
+            ...prev,
+            month: newMonth,
+            year: newYear,
+            checkingAccount: prev.checkingAccount - monthlyExpenses.total,
+            unemploymentWeeks: prev.unemploymentWeeks + 4,
+            stress: Math.min(100, prev.stress + 5)
+          };
+        });
+        
+        // Civic & Social Systems - Background simulation
+        simulateNPCInfluence();
+        
+        // Trigger social events occasionally
+        if (Math.random() < 0.15) { // 15% chance per month
+          const socialEvent = triggerSocialEvent();
+          if (socialEvent) {
+            setTimeout(() => setShowEvent(socialEvent), 1000);
+          }
+        }
+        
+        // Trigger elections every 2-4 years (November) - only if registered
+        if (player.month === 11 && !currentElection && player.registeredToVote) { // November
+          const yearsSinceLastElection = electionHistory.length > 0 
+            ? player.year - electionHistory[electionHistory.length - 1].year 
+            : player.year - 2024;
+          
+          // Elections every 2, 3, or 4 years
+          if (yearsSinceLastElection >= 2 && Math.random() < 0.7) {
+            setTimeout(() => triggerElection(), 2000);
+          }
+        }
+        
+        // Remind player to register to vote (if not registered and older than 18)
+        if (player.age >= 18 && !player.registeredToVote && player.month === 1 && player.year % 2 === 0) {
+          setTimeout(() => {
+            addNotification('💡 Reminder: You can register to vote in the Civic tab!');
+          }, 3000);
+        }
+        
+        // Random event check (existing system) - reduced frequency to make room for social events
+        if (Math.random() < 0.08) { // 8% chance per month
+          setTimeout(() => triggerRandomEvent(), 500);
+        }
+      };
+
+      // Calculate all monthly expenses
+      const calculateMonthlyExpenses = (playerData) => {
+        const expenses = {
+          housing: playerData.housingType === 'parents' ? 0 : 
+                  playerData.housingType === 'apartment' ? playerData.monthlyRent : 
+                  playerData.mortgage ? playerData.mortgage.monthlyPayment : 0,
+          utilities: playerData.utilities,
+          phoneInternet: playerData.phoneInternet,
+          groceries: playerData.groceriesPerMonth,
+          transportation: playerData.transportation,
+          carPayment: playerData.carLoan ? playerData.carLoan.monthlyPayment : 0,
+          carInsurance: playerData.carInsurance ? playerData.carInsuranceCost : 0,
+          rentersInsurance: playerData.rentersInsurance ? playerData.rentersInsuranceCost : 0,
+          subscriptions: playerData.subscriptions.reduce((sum, sub) => sum + sub.cost, 0),
+          diningOut: playerData.diningOut,
+          entertainment: playerData.entertainment,
+          studentLoans: playerData.studentLoans.reduce((sum, loan) => sum + loan.monthlyPayment, 0)
+        };
+
+        expenses.total = Object.values(expenses).reduce((sum, val) => sum + val, 0);
+        return expenses;
+      };
+
+      // Trigger random life events
+      const triggerRandomEvent = () => {
+        const events = [
+          {
+            id: 'car_repair',
+            title: '🚗 Car Repair Needed',
+            description: 'Your car needs a $800 repair to pass inspection.',
+            choices: [
+              { text: 'Pay for repair ($800)', effect: { checking: -800 } },
+              { text: 'Use credit card', effect: { creditCard: 800 } },
+              { text: 'Skip it (risk ticket)', effect: { stress: 15 } }
+            ]
+          },
+          {
+            id: 'medical_bill',
+            title: '🏥 Medical Bill',
+            description: 'Unexpected medical bill: $450',
+            choices: [
+              { text: 'Pay from checking', effect: { checking: -450 } },
+              { text: 'Payment plan ($50/month)', effect: { monthlyExpense: 50 } },
+              { text: 'Put on credit card', effect: { creditCard: 450 } }
+            ]
+          },
+          {
+            id: 'tax_refund',
+            title: '💰 Tax Refund!',
+            description: 'You got a $1,200 tax refund!',
+            choices: [
+              { text: 'Save it all', effect: { savings: 1200 } },
+              { text: 'Pay off debt', effect: { debtPayment: 1200 } },
+              { text: 'Treat yourself ($400) + save rest', effect: { checking: 400, savings: 800, stress: -10 } },
+              { text: 'Invest in retirement', effect: { rothIRA: 1200 } }
+            ]
+          },
+          {
+            id: 'job_offer',
+            title: '💼 Job Opportunity',
+            description: 'You got a job offer with 15% higher pay but less stability.',
+            choices: [
+              { text: 'Take the new job', effect: { wageIncrease: 0.15, stabilityDecrease: 20 } },
+              { text: 'Stay at current job', effect: { stress: -5 } }
+            ]
+          },
+          {
+            id: 'credit_card_offer',
+            title: '💳 Credit Card Offer',
+            description: 'Pre-approved for a credit card: $3,000 limit, 18% APR',
+            choices: [
+              { text: 'Accept (helps credit mix)', effect: { newCreditCard: { limit: 3000, apr: 18 } } },
+              { text: 'Decline', effect: {} }
+            ]
+          },
+          {
+            id: 'rent_increase',
+            title: '🏠 Rent Increase',
+            description: 'Your landlord is raising rent by $150/month.',
+            choices: [
+              { text: 'Accept it', effect: { rentIncrease: 150, stress: 10 } },
+              { text: 'Negotiate (50/50 chance)', effect: { negotiate: true } },
+              { text: 'Look for new place', effect: { movingCosts: 1500, stress: 20 } }
+            ]
+          },
+          {
+            id: 'bonus',
+            title: '🎉 Work Bonus!',
+            description: 'You received a $500 performance bonus!',
+            choices: [
+              { text: 'Take it!', effect: { checking: 500, stress: -5 } }
+            ]
+          },
+          {
+            id: 'identity_theft',
+            title: '⚠️ Fraud Alert',
+            description: 'Suspicious charges on your account: $250',
+            choices: [
+              { text: 'Report to bank (no charge)', effect: { stress: 10 } },
+              { text: 'Freeze credit (safe but inconvenient)', effect: { creditFrozen: true } }
+            ]
+          }
+        ];
+
+        const event = events[Math.floor(Math.random() * events.length)];
+        setShowEvent(event);
+      };
+
+      // ==================== CIVIC & SOCIAL SYSTEMS ====================
+      
+      // Generate NPC with procedural traits
+      const generateNPC = (context = 'random') => {
+        const firstNames = ['Alex', 'Jordan', 'Sam', 'Taylor', 'Morgan', 'Casey', 'Riley', 'Avery', 'Quinn', 'Drew',
+                           'Jamie', 'Skyler', 'Cameron', 'Dakota', 'Rowan', 'Sage', 'Kai', 'River', 'Phoenix', 'Hayden',
+                           'Parker', 'Blake', 'Emerson', 'Harper', 'Logan', 'Kendall', 'Reese', 'Finley', 'Marley', 'Ellis'];
+        const lastNames = ['Chen', 'Rodriguez', 'Patel', 'Johnson', 'Kim', 'Martinez', 'Williams', 'Singh', 'Brown', 'Lee',
+                          'Davis', 'Miller', 'Garcia', 'Nguyen', 'Taylor', 'Anderson', 'Thomas', 'Jackson', 'White', 'Harris',
+                          'Martin', 'Thompson', 'Moore', 'Clark', 'Lewis', 'Walker', 'Hall', 'Allen', 'Young', 'King'];
+        
+        const personalities = ['friendly', 'reserved', 'outgoing', 'serious', 'humorous', 'pragmatic', 'idealistic', 'cynical'];
+        const politicalLeanings = ['progressive', 'moderate', 'conservative', 'apolitical', 'independent'];
+        const priorities = ['economic', 'social', 'environmental', 'security', 'education', 'healthcare'];
+        
+        return {
+          id: Date.now() + Math.random(),
+          name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
+          personality: personalities[Math.floor(Math.random() * personalities.length)],
+          politicalLeaning: politicalLeanings[Math.floor(Math.random() * politicalLeanings.length)],
+          priority: priorities[Math.floor(Math.random() * priorities.length)],
+          context, // where you met them
+          opinionOfPlayer: 50, // 0-100 scale
+          trustLevel: 30, // 0-100 scale
+          influenceability: 30 + Math.random() * 40, // how easily swayed
+          votingLikelihood: 40 + Math.random() * 50, // % chance they vote
+          monthMet: player.month,
+          yearMet: player.year,
+        };
+      };
+
+      // Generate election candidate
+      const generateCandidate = () => {
+        const firstNames = ['Sarah', 'Michael', 'Jennifer', 'David', 'Maria', 'Robert', 'Lisa', 'James', 'Patricia', 'John'];
+        const lastNames = ['Anderson', 'Martinez', 'Thompson', 'Garcia', 'Rodriguez', 'Wilson', 'Moore', 'Taylor', 'Lee', 'Brown'];
+        const parties = ['Progressive', 'Conservative', 'Independent', 'Moderate'];
+        
+        const economicStances = ['pro-business', 'labor-focused', 'balanced', 'reform-minded'];
+        const socialStances = ['traditional', 'progressive', 'libertarian', 'centrist'];
+        const priorities = ['economy', 'healthcare', 'education', 'environment', 'security', 'infrastructure'];
+        
+        const competence = 40 + Math.random() * 50; // 40-90
+        const charisma = 30 + Math.random() * 60; // 30-90
+        const integrity = 20 + Math.random() * 70; // 20-90
+        
+        return {
+          id: Date.now() + Math.random(),
+          name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
+          party: parties[Math.floor(Math.random() * parties.length)],
+          economicStance: economicStances[Math.floor(Math.random() * economicStances.length)],
+          socialStance: socialStances[Math.floor(Math.random() * socialStances.length)],
+          topPriority: priorities[Math.floor(Math.random() * priorities.length)],
+          competence,
+          charisma,
+          integrity,
+          publicSupport: 30 + Math.random() * 40, // initial polling
+          campaignSpending: Math.random() * 100,
+        };
+      };
+
+      // Trigger election
+      const triggerElection = () => {
+        const candidates = [
+          generateCandidate(),
+          generateCandidate(),
+          Math.random() > 0.5 ? generateCandidate() : null, // sometimes 3-way race
+        ].filter(Boolean);
+        
+        setCurrentElection({
+          year: player.year,
+          month: player.month,
+          candidates,
+          hasVoted: false,
+          playerChoice: null,
+          campaignPhase: 'active', // active, voting, completed
+        });
+        
+        addNotification('🗳️ Election Season! Check the Civic tab to learn about candidates.');
+      };
+
+      // Calculate NPC vote based on their traits, bonds, and candidate appeal
+      const calculateNPCVote = (npc, candidates) => {
+        let scores = candidates.map(candidate => {
+          let score = candidate.publicSupport;
+          
+          // Align with political leaning
+          if (npc.politicalLeaning === 'progressive' && candidate.party === 'Progressive') score += 30;
+          if (npc.politicalLeaning === 'conservative' && candidate.party === 'Conservative') score += 30;
+          if (npc.politicalLeaning === 'moderate' && candidate.party === 'Moderate') score += 25;
+          if (npc.politicalLeaning === 'independent') score += candidate.integrity * 0.3;
+          
+          // Priority alignment
+          if (npc.priority === candidate.topPriority) score += 20;
+          
+          // Personality affects what they value
+          if (npc.personality === 'pragmatic') score += candidate.competence * 0.4;
+          if (npc.personality === 'idealistic') score += candidate.integrity * 0.5;
+          if (npc.personality === 'cynical') score -= candidate.charisma * 0.2;
+          
+          // Social bond with player influences vote
+          const bond = socialBonds.find(b => b.npcId === npc.id);
+          if (bond && bond.trust > 60 && bond.influence > 40) {
+            // Player's lifestyle subtly influences their vote
+            if (player.civicEngagement > 70) score += 10;
+            if (player.socialReputation > 70) score += 8;
+          }
+          
+          return { candidate, score };
+        });
+        
+        // Weighted random selection
+        const totalScore = scores.reduce((sum, s) => sum + Math.max(0, s.score), 0);
+        let rand = Math.random() * totalScore;
+        
+        for (let s of scores) {
+          rand -= Math.max(0, s.score);
+          if (rand <= 0) return s.candidate;
+        }
+        
+        return scores[0].candidate;
+      };
+
+      // Process election results
+      const processElectionResults = (playerVote = null) => {
+        if (!currentElection) return;
+        
+        const results = {};
+        currentElection.candidates.forEach(c => {
+          results[c.id] = 0;
+        });
+        
+        // Player vote
+        if (playerVote) {
+          results[playerVote.id] += 1;
+          setPlayer(prev => ({
+            ...prev,
+            votingHistory: [...prev.votingHistory, {
+              year: player.year,
+              candidate: playerVote.name,
+              party: playerVote.party,
+            }],
+            lastVotedYear: player.year,
+            civicEngagement: Math.min(100, prev.civicEngagement + 10),
+          }));
+        }
+        
+        // NPC votes (weighted by their voting likelihood)
+        npcs.forEach(npc => {
+          if (Math.random() * 100 < npc.votingLikelihood) {
+            const choice = calculateNPCVote(npc, currentElection.candidates);
+            results[choice.id] += 1;
+          }
+        });
+        
+        // Add baseline population votes (simulate larger electorate)
+        const baselineVoters = 100 + Math.floor(Math.random() * 200);
+        for (let i = 0; i < baselineVoters; i++) {
+          const weights = currentElection.candidates.map(c => 
+            c.publicSupport + c.charisma * 0.3 + c.competence * 0.2
+          );
+          const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+          let rand = Math.random() * totalWeight;
+          
+          for (let j = 0; j < currentElection.candidates.length; j++) {
+            rand -= weights[j];
+            if (rand <= 0) {
+              results[currentElection.candidates[j].id] += 1;
+              break;
+            }
+          }
+        }
+        
+        // Determine winner
+        const winner = currentElection.candidates.reduce((prev, current) => 
+          results[current.id] > results[prev.id] ? current : prev
+        );
+        
+        setElectionHistory(prev => [...prev, {
+          year: player.year,
+          candidates: currentElection.candidates,
+          results,
+          winner,
+          playerVoted: playerVote !== null,
+          playerChoice: playerVote,
+        }]);
+        
+        // Update political climate based on winner
+        setPoliticalClimate(prev => {
+          const shifts = {};
+          if (winner.economicStance === 'pro-business') shifts.economicSentiment = 5;
+          if (winner.economicStance === 'labor-focused') shifts.economicSentiment = -3;
+          if (winner.integrity > 70) shifts.trustInGovernment = 8;
+          if (winner.integrity < 40) shifts.trustInGovernment = -10;
+          if (winner.party === 'Progressive' || winner.party === 'Conservative') {
+            shifts.socialTension = 5; // polarization
+          } else {
+            shifts.socialTension = -3; // moderation reduces tension
+          }
+          
+          return {
+            economicSentiment: Math.max(0, Math.min(100, prev.economicSentiment + (shifts.economicSentiment || 0))),
+            socialTension: Math.max(0, Math.min(100, prev.socialTension + (shifts.socialTension || 0))),
+            trustInGovernment: Math.max(0, Math.min(100, prev.trustInGovernment + (shifts.trustInGovernment || 0))),
+          };
+        });
+        
+        setCurrentElection(null);
+        
+        addNotification(`📊 Election Results: ${winner.name} (${winner.party}) wins!`);
+        
+        if (!playerVote) {
+          addNotification('You didn\'t vote. Your civic engagement decreased.');
+          setPlayer(prev => ({
+            ...prev,
+            civicEngagement: Math.max(0, prev.civicEngagement - 5),
+            socialReputation: Math.max(0, prev.socialReputation - 3),
+          }));
+        }
+      };
+
+      // Social interaction with NPC
+      const interactWithNPC = (npcId, interactionType) => {
+        const npc = npcs.find(n => n.id === npcId);
+        if (!npc) return;
+        
+        let opinionChange = 0;
+        let trustChange = 0;
+        
+        switch (interactionType) {
+          case 'help':
+            opinionChange = 5 + Math.random() * 10;
+            trustChange = 3 + Math.random() * 7;
+            break;
+          case 'chat':
+            opinionChange = 2 + Math.random() * 5;
+            trustChange = 1 + Math.random() * 3;
+            break;
+          case 'disagree':
+            opinionChange = -(3 + Math.random() * 8);
+            trustChange = -(1 + Math.random() * 4);
+            break;
+          case 'ignore':
+            opinionChange = -(1 + Math.random() * 3);
+            break;
+        }
+        
+        // Update NPC
+        setNpcs(prev => prev.map(n => n.id === npcId ? {
+          ...n,
+          opinionOfPlayer: Math.max(0, Math.min(100, n.opinionOfPlayer + opinionChange)),
+          trustLevel: Math.max(0, Math.min(100, n.trustLevel + trustChange)),
+        } : n));
+        
+        // Update or create social bond
+        setSocialBonds(prev => {
+          const existingBond = prev.find(b => b.npcId === npcId);
+          if (existingBond) {
+            return prev.map(b => b.npcId === npcId ? {
+              ...b,
+              strength: Math.max(0, Math.min(100, b.strength + opinionChange)),
+              trust: Math.max(0, Math.min(100, b.trust + trustChange)),
+              lastInteraction: { month: player.month, year: player.year },
+              interactions: b.interactions + 1,
+            } : b);
+          } else {
+            return [...prev, {
+              npcId,
+              strength: 50 + opinionChange,
+              trust: 30 + trustChange,
+              influence: 20,
+              type: opinionChange > 0 ? 'friendly' : 'neutral',
+              lastInteraction: { month: player.month, year: player.year },
+              interactions: 1,
+            }];
+          }
+        });
+        
+        // Player gains reputation from positive interactions
+        if (opinionChange > 0) {
+          setPlayer(prev => ({
+            ...prev,
+            socialReputation: Math.min(100, prev.socialReputation + 1),
+          }));
+        }
+      };
+
+      // Generate social events (meeting NPCs)
+      const triggerSocialEvent = () => {
+        const socialEvents = [
+          {
+            title: '👋 New Coworker',
+            description: `You have a new coworker who seems friendly.`,
+            onSelect: () => {
+              const npc = generateNPC('work');
+              setNpcs(prev => [...prev, npc]);
+              addNotification(`Met ${npc.name} at work!`);
+            },
+            choices: [
+              { text: 'Introduce yourself warmly', effect: 'help' },
+              { text: 'Say hi briefly', effect: 'chat' },
+              { text: 'Keep to yourself', effect: 'ignore' },
+            ]
+          },
+          {
+            title: '🏘️ Neighbor Introduction',
+            description: 'A neighbor stops you in the hallway to chat.',
+            onSelect: () => {
+              const npc = generateNPC('neighbor');
+              setNpcs(prev => [...prev, npc]);
+              addNotification(`Met ${npc.name}, your neighbor!`);
+            },
+            choices: [
+              { text: 'Chat for a while', effect: 'chat' },
+              { text: 'Polite but brief', effect: 'ignore' },
+            ]
+          },
+          {
+            title: '🎉 Community Event',
+            description: 'There\'s a community gathering in your area.',
+            choices: [
+              { 
+                text: 'Attend and mingle', 
+                effect: { 
+                  exec: () => {
+                    // Generate 2-3 new NPCs
+                    const count = 2 + Math.floor(Math.random() * 2);
+                    for (let i = 0; i < count; i++) {
+                      const npc = generateNPC('community');
+                      setNpcs(prev => [...prev, npc]);
+                    }
+                    setPlayer(prev => ({
+                      ...prev,
+                      socialReputation: Math.min(100, prev.socialReputation + 5),
+                      civicEngagement: Math.min(100, prev.civicEngagement + 3),
+                    }));
+                    addNotification(`Met ${count} new people at the event!`);
+                  }
+                }
+              },
+              { text: 'Skip it', effect: {} },
+            ]
+          },
+        ];
+        
+        const event = socialEvents[Math.floor(Math.random() * socialEvents.length)];
+        return event;
+      };
+
+      // Background NPC influence simulation
+      const simulateNPCInfluence = () => {
+        // NPCs influence each other's opinions slightly each month
+        setNpcs(prev => prev.map(npc => {
+          // Slight random drift in political sentiment
+          const drift = (Math.random() - 0.5) * 2;
+          
+          // NPCs with high influenceability change more
+          const actualDrift = drift * (npc.influenceability / 100);
+          
+          return {
+            ...npc,
+            votingLikelihood: Math.max(20, Math.min(95, npc.votingLikelihood + actualDrift)),
+          };
+        }));
+        
+        // Political climate slowly drifts
+        setPoliticalClimate(prev => ({
+          economicSentiment: Math.max(0, Math.min(100, prev.economicSentiment + (Math.random() - 0.5) * 2)),
+          socialTension: Math.max(0, Math.min(100, prev.socialTension + (Math.random() - 0.5))),
+          trustInGovernment: Math.max(0, Math.min(100, prev.trustInGovernment + (Math.random() - 0.5) * 1.5)),
+        }));
+      };
+
+      // Trigger tax filing event
+      const triggerTaxEvent = () => {
+        setShowEvent({
+          id: 'tax_filing',
+          title: '📋 Tax Season',
+          description: `Time to file your ${player.year - 1} taxes!`,
+          choices: [
+            { text: 'File taxes myself (free)', effect: { fileTaxes: 'self' } },
+            { text: 'Hire accountant ($200)', effect: { fileTaxes: 'accountant', checking: -200 } },
+            { text: 'Ignore (face penalties)', effect: { stress: 30 } }
+          ]
+        });
+      };
+
+      // Handle event choices
+      const handleEventChoice = (choice) => {
+        const effect = choice.effect;
+        
+        setPlayer(prev => {
+          let updates = { ...prev };
+
+          if (effect.checking) updates.checkingAccount += effect.checking;
+          if (effect.savings) updates.savingsAccount += effect.savings;
+          if (effect.creditCard) {
+            if (prev.creditCards.length > 0) {
+              const updatedCards = [...prev.creditCards];
+              updatedCards[0].balance += effect.creditCard;
+              updates.creditCards = updatedCards;
+            } else {
+              addNotification('You don\'t have a credit card!');
+            }
+          }
+          if (effect.stress) updates.stress = Math.max(0, Math.min(100, prev.stress + effect.stress));
+          if (effect.rothIRA) updates.rothIRA += effect.rothIRA;
+          if (effect.rentIncrease) updates.monthlyRent += effect.rentIncrease;
+          
+          if (effect.newCreditCard) {
+            updates.creditCards = [...prev.creditCards, {
+              name: 'New Credit Card',
+              limit: effect.newCreditCard.limit,
+              balance: 0,
+              apr: effect.newCreditCard.apr
+            }];
+            updates.hardInquiries += 1;
+          }
+
+          if (effect.fileTaxes) {
+            const taxesOwed = calculateFederalTax(prev.yearToDateIncome) + 
+                            calculateStateTax(prev.yearToDateIncome);
+            const refundOrOwed = prev.taxesPaid - taxesOwed;
+            
+            if (refundOrOwed > 0) {
+              addNotification(`💰 Tax refund: $${refundOrOwed.toFixed(2)}`);
+              updates.checkingAccount += refundOrOwed;
+            } else {
+              addNotification(`⚠️ You owe taxes: $${Math.abs(refundOrOwed).toFixed(2)}`);
+              updates.checkingAccount += refundOrOwed; // Negative number
+            }
+            
+            updates.lastFiledYear = prev.year;
+            updates.taxesPaid = 0;
+            updates.yearToDateIncome = 0;
+          }
+
+          return updates;
+        });
+
+        setDecisions(prev => [...prev, {
+          month: player.month,
+          year: player.year,
+          event: showEvent.title,
+          choice: choice.text
+        }]);
+
+        setShowEvent(null);
+      };
+
+      // Add notification
+      const addNotification = (message, type = 'info') => {
+        const id = Date.now();
+        setNotifications(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setNotifications(prev => prev.filter(n => n.id !== id));
+        }, 5000);
+      };
+
+      // Get a job
+      const getJob = (job) => {
+        setPlayer(prev => ({
+          ...prev,
+          job,
+          hourlyWage: job.wage,
+          hoursPerWeek: job.hours,
+          unemploymentWeeks: 0,
+          has401k: job.benefits,
+          healthInsurance: job.benefits,
+          healthInsuranceCost: job.benefits ? 200 : 0,
+          stress: Math.max(0, prev.stress - 20)
+        }));
+        
+        addNotification(`🎉 Congratulations! You're now a ${job.title}!`);
+        unlockAchievement('Employed', 'Got your first job');
+      };
+
+      // Open a credit card
+      const openCreditCard = () => {
+        if (player.creditScore < 600) {
+          addNotification('❌ Credit score too low for approval');
+          return;
+        }
+
+        const limit = player.creditScore >= 700 ? 5000 : 
+                     player.creditScore >= 650 ? 3000 : 1500;
+        const apr = player.creditScore >= 700 ? 15.99 : 
+                   player.creditScore >= 650 ? 19.99 : 24.99;
+
+        setPlayer(prev => ({
+          ...prev,
+          creditCards: [...prev.creditCards, {
+            name: 'Credit Card',
+            limit,
+            balance: 0,
+            apr
+          }],
+          hardInquiries: prev.hardInquiries + 1
+        }));
+
+        addNotification(`✅ Approved! $${limit} limit at ${apr}% APR`);
+      };
+
+      // Start 401k contributions
+      const start401k = (percent) => {
+        if (!player.has401k) {
+          addNotification('Your job doesn\'t offer a 401k');
+          return;
+        }
+
+        setPlayer(prev => ({
+          ...prev,
+          contributionPercent: percent
+        }));
+
+        addNotification(`✅ Contributing ${percent}% to 401k`);
+        unlockAchievement('Retirement Planning', 'Started saving for retirement');
+      };
+
+      // Make extra payment on credit card
+      const makeExtraPayment = (type, index, amount) => {
+        if (player.checkingAccount < amount) {
+          addNotification('❌ Insufficient funds in checking account');
+          return;
+        }
+
+        setPlayer(prev => {
+          const updates = { checkingAccount: prev.checkingAccount - amount };
+
+          if (type === 'creditCard') {
+            const updatedCards = [...prev.creditCards];
+            const oldBalance = updatedCards[index].balance;
+            updatedCards[index].balance = Math.max(0, updatedCards[index].balance - amount);
+            const newBalance = updatedCards[index].balance;
+            updates.creditCards = updatedCards;
+            
+            // Check if card was fully paid off
+            if (oldBalance > 0 && newBalance === 0) {
+              const creditScoreBoost = 15;
+              updates.creditScore = Math.min(850, prev.creditScore + creditScoreBoost);
+              updates.onTimePayments = Math.min(100, prev.onTimePayments + 3);
+              addNotification('🎉 Credit card paid off completely!');
+              addNotification(`📈 Credit score increased by ${creditScoreBoost} points!`);
+            } else {
+              addNotification(`✅ Paid $${amount.toFixed(2)} on credit card`);
+            }
+          } else if (type === 'studentLoan') {
+            const updatedLoans = [...prev.studentLoans];
+            updatedLoans[index].balance = Math.max(0, updatedLoans[index].balance - amount);
+            updates.studentLoans = updatedLoans;
+            addNotification(`✅ Paid $${amount.toFixed(2)} on student loan`);
+          } else if (type === 'carLoan') {
+            const newBalance = Math.max(0, prev.carLoan.balance - amount);
+            updates.carLoan = { ...prev.carLoan, balance: newBalance };
+            if (newBalance === 0) {
+              // Boost credit score for paying off loan
+              const creditScoreBoost = 25;
+              updates.creditScore = Math.min(850, prev.creditScore + creditScoreBoost);
+              updates.onTimePayments = Math.min(100, prev.onTimePayments + 5);
+              addNotification('🎉 Car loan paid off!');
+              addNotification(`📈 Credit score increased by ${creditScoreBoost} points!`);
+              unlockAchievement('Debt Free (Car)', 'Paid off your car loan');
+            } else {
+              addNotification(`✅ Paid $${amount.toFixed(2)} on car loan`);
+            }
+          } else if (type === 'mortgage') {
+            const newBalance = Math.max(0, prev.mortgage.balance - amount);
+            updates.mortgage = { ...prev.mortgage, balance: newBalance };
+            if (newBalance === 0) {
+              // Boost credit score for paying off mortgage
+              const creditScoreBoost = 30;
+              updates.creditScore = Math.min(850, prev.creditScore + creditScoreBoost);
+              updates.onTimePayments = Math.min(100, prev.onTimePayments + 5);
+              addNotification('🎉🏠 Mortgage paid off! You own your home!');
+              addNotification(`📈 Credit score increased by ${creditScoreBoost} points!`);
+              unlockAchievement('Homeowner', 'Fully paid off your mortgage');
+            } else {
+              addNotification(`✅ Paid $${amount.toFixed(2)} on mortgage`);
+            }
+          }
+
+          return { ...prev, ...updates };
+        });
+      };
+
+      // Unlock achievement
+      const unlockAchievement = (title, description) => {
+        if (achievements.find(a => a.title === title)) return;
+        
+        setAchievements(prev => [...prev, { title, description, date: `${player.month}/${player.year}` }]);
+        addNotification(`🏆 ${title}: ${description}`);
+      };
+
+      // Start game
+      const startGame = () => {
+        if (!player.name) return;
+        setGameStarted(true);
+        addNotification('Welcome to adult life! Good luck. 💼');
+      };
+
+      // Format currency
+      const formatMoney = (amount) => {
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          minimumFractionDigits: 2
+        }).format(amount);
+      };
+
+      // ==================== PRACTICE MODES ====================
+      
+      // Generate tax practice problem based on level
+      const generateTaxProblem = (level) => {
+        const baseIncome = 20000 + (level * 3000);
+        const variance = Math.random() * 10000 - 5000;
+        const income = Math.max(15000, baseIncome + variance);
+        
+        const hasStudentLoanInterest = level > 5 && Math.random() > 0.5;
+        const has401k = level > 10 && Math.random() > 0.5;
+        const hasMortgageInterest = level > 20 && Math.random() > 0.5;
+        const hasCharitableDonations = level > 15 && Math.random() > 0.6;
+        
+        return {
+          income: Math.round(income),
+          studentLoanInterest: hasStudentLoanInterest ? Math.round(1000 + Math.random() * 1500) : 0,
+          contribution401k: has401k ? Math.round(income * (0.03 + Math.random() * 0.07)) : 0,
+          mortgageInterest: hasMortgageInterest ? Math.round(5000 + Math.random() * 10000) : 0,
+          charitableDonations: hasCharitableDonations ? Math.round(500 + Math.random() * 2000) : 0,
+          filingStatus: level > 25 && Math.random() > 0.5 ? 'married' : 'single',
+        };
+      };
+      
+      // Calculate correct tax answer
+      const calculateTaxAnswer = (problem) => {
+        let adjustedIncome = problem.income - problem.contribution401k;
+        
+        // Standard deduction
+        const standardDeduction = problem.filingStatus === 'married' ? 27700 : 13850;
+        
+        // Itemized deductions (if better than standard)
+        const itemizedDeductions = problem.studentLoanInterest + problem.mortgageInterest + problem.charitableDonations;
+        const deduction = Math.max(standardDeduction, itemizedDeductions);
+        
+        const taxableIncome = Math.max(0, adjustedIncome - deduction);
+        
+        const federalTax = calculateFederalTax(taxableIncome);
+        const stateTax = calculateStateTax(taxableIncome);
+        const fica = calculateSocialSecurity(problem.income) + calculateMedicare(problem.income);
+        
+        return {
+          adjustedIncome,
+          taxableIncome,
+          federalTax,
+          stateTax,
+          fica,
+          totalTax: federalTax + stateTax + fica,
+        };
+      };
+      
+      // Generate cooking challenge based on level
+      const generateCookingChallenge = (level) => {
+        const ingredients = [
+          { name: 'Chicken Breast', cost: 4.50, calories: 165, protein: true },
+          { name: 'Ground Beef', cost: 5.00, calories: 250, protein: true },
+          { name: 'Salmon', cost: 8.00, calories: 206, protein: true },
+          { name: 'Tofu', cost: 2.50, calories: 80, protein: true },
+          { name: 'Rice', cost: 1.00, calories: 200, carb: true },
+          { name: 'Pasta', cost: 1.50, calories: 220, carb: true },
+          { name: 'Potatoes', cost: 1.20, calories: 160, carb: true },
+          { name: 'Quinoa', cost: 3.00, calories: 180, carb: true },
+          { name: 'Broccoli', cost: 2.00, calories: 35, veggie: true },
+          { name: 'Spinach', cost: 2.50, calories: 20, veggie: true },
+          { name: 'Carrots', cost: 1.50, calories: 40, veggie: true },
+          { name: 'Bell Peppers', cost: 3.00, calories: 30, veggie: true },
+          { name: 'Olive Oil', cost: 1.00, calories: 120, fat: true },
+          { name: 'Butter', cost: 1.50, calories: 100, fat: true },
+          { name: 'Garlic', cost: 0.50, calories: 5, seasoning: true },
+          { name: 'Onion', cost: 0.75, calories: 45, seasoning: true },
+          { name: 'Tomatoes', cost: 2.00, calories: 20, veggie: true },
+          { name: 'Eggs', cost: 2.50, calories: 70, protein: true },
+          { name: 'Cheese', cost: 3.50, calories: 110, fat: true },
+          { name: 'Beans', cost: 1.80, calories: 130, protein: true },
+        ];
+        
+        // Difficulty increases with level
+        const numIngredients = Math.min(3 + Math.floor(level / 5), 12);
+        const availableIngredients = [];
+        const shuffled = [...ingredients].sort(() => Math.random() - 0.5);
+        
+        for (let i = 0; i < numIngredients; i++) {
+          availableIngredients.push(shuffled[i]);
+        }
+        
+        // Goals get stricter with level
+        const budgetMultiplier = 1.2 - (level * 0.01); // Gets tighter
+        const calorieTarget = 400 + (level * 10); // Increases
+        const calorieRange = Math.max(50, 150 - level * 2); // Gets narrower
+        
+        return {
+          level,
+          ingredients: availableIngredients,
+          budget: Math.round(availableIngredients.reduce((sum, i) => sum + i.cost, 0) * budgetMultiplier * 0.6),
+          calorieTarget,
+          calorieMin: calorieTarget - calorieRange,
+          calorieMax: calorieTarget + calorieRange,
+          servings: level > 25 ? 2 + Math.floor(Math.random() * 2) : 1,
+        };
+      };
+      
+      // Grade cooking attempt
+      const gradeCookingAttempt = (challenge, selectedIngredients) => {
+        if (selectedIngredients.length === 0) {
+          return {
+            tasteScore: 0,
+            priceScore: 0,
+            calorieScore: 0,
+            overallScore: 0,
+            grade: 'F',
+            totalCost: 0,
+            totalCalories: 0,
+            balanced: false,
+          };
+        }
+
+        const totalCost = selectedIngredients.reduce((sum, ing) => sum + ing.cost, 0);
+        const totalCalories = selectedIngredients.reduce((sum, ing) => sum + ing.calories, 0);
+        
+        // Check for balanced meal (protein + carb + veggie)
+        const hasProtein = selectedIngredients.some(i => i.protein);
+        const hasCarb = selectedIngredients.some(i => i.carb);
+        const hasVeggie = selectedIngredients.some(i => i.veggie);
+        const balanced = hasProtein && hasCarb && hasVeggie;
+        
+        // Taste score (0-100) - MORE GENEROUS
+        let tasteScore = 40; // Start higher
+        if (balanced) tasteScore += 40; // Big bonus for balanced meal
+        if (selectedIngredients.length >= 3) tasteScore += 15;
+        if (selectedIngredients.some(i => i.seasoning)) tasteScore += 10;
+        if (selectedIngredients.some(i => i.fat)) tasteScore += 5; // Fat adds flavor
+        tasteScore = Math.min(100, tasteScore); // Cap at 100
+        
+        // Price score (0-100) - MORE FORGIVING
+        const budgetDifference = totalCost - challenge.budget;
+        let priceScore = 100;
+        
+        if (budgetDifference > 0) {
+          // Over budget - penalize but not too harsh
+          const percentOver = (budgetDifference / challenge.budget) * 100;
+          priceScore = Math.max(0, 100 - (percentOver * 1.5)); // Less harsh penalty
+        } else {
+          // Under budget - that's good! Minor penalty for being too far under
+          const percentUnder = Math.abs(budgetDifference / challenge.budget) * 100;
+          if (percentUnder > 30) {
+            priceScore = 100 - (percentUnder - 30); // Only penalize if way under
+          }
+        }
+        
+        // Calorie score (0-100) - MUCH MORE FORGIVING
+        let calorieScore = 0;
+        const calorieTarget = (challenge.calorieMin + challenge.calorieMax) / 2;
+        const calorieRange = challenge.calorieMax - challenge.calorieMin;
+        
+        if (totalCalories >= challenge.calorieMin && totalCalories <= challenge.calorieMax) {
+          // Perfect! In range
+          calorieScore = 100;
+        } else {
+          // Out of range - but be forgiving
+          const calorieError = Math.min(
+            Math.abs(totalCalories - challenge.calorieMin),
+            Math.abs(totalCalories - challenge.calorieMax)
+          );
+          // Much more forgiving calculation
+          calorieScore = Math.max(30, 100 - (calorieError / calorieTarget) * 100);
+        }
+        
+        // Overall grade - weighted toward taste (it's cooking!)
+        const avgScore = (tasteScore * 0.5 + priceScore * 0.25 + calorieScore * 0.25);
+        let grade = 'F';
+        if (avgScore >= 85) grade = 'A';
+        else if (avgScore >= 70) grade = 'B';
+        else if (avgScore >= 55) grade = 'C';
+        else if (avgScore >= 40) grade = 'D';
+        
+        return {
+          tasteScore: Math.round(tasteScore),
+          priceScore: Math.round(priceScore),
+          calorieScore: Math.round(calorieScore),
+          overallScore: Math.round(avgScore),
+          grade,
+          totalCost,
+          totalCalories,
+          balanced,
+        };
+      };
+
+      // ==================== RENDER ====================
+
+      if (!gameStarted) {
+        // HOME MENU
+        if (homeMenuMode === 'main') {
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center p-4">
+              <div className="max-w-4xl w-full bg-white/10 backdrop-blur-lg rounded-3xl p-8 border-2 border-white/20">
+                <h1 className="text-6xl font-black text-white mb-4 text-center">
+                  Adult Life Simulator
+                </h1>
+                <p className="text-xl text-white/80 mb-8 text-center">
+                  Experience the joy of taxes, bills, and budgeting!
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                  {/* Start Game */}
+                  <div className="bg-white/20 rounded-xl p-6 border-2 border-white/30 hover:bg-white/30 transition-all">
+                    <div className="text-4xl mb-3 text-center">🎮</div>
+                    <h3 className="text-2xl font-bold text-white mb-2 text-center">Start Game</h3>
+                    <p className="text-white/70 text-sm mb-4 text-center">
+                      Begin your adult life simulation
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Enter your name..."
+                      value={player.name}
+                      onChange={(e) => setPlayer({...player, name: e.target.value})}
+                      className="w-full px-4 py-3 text-lg rounded-lg border-2 border-white/30 bg-white/10 text-white placeholder-white/50 mb-3"
+                      onKeyPress={(e) => e.key === 'Enter' && player.name && startGame()}
+                    />
+                    <button
+                      onClick={startGame}
+                      disabled={!player.name}
+                      className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-blue-500 text-white text-lg font-bold rounded-lg hover:from-green-600 hover:to-blue-600 disabled:opacity-50 transition-all"
+                    >
+                      Start Adulting
+                    </button>
+                  </div>
+
+                  {/* Tax Practice */}
+                  <div className="bg-white/20 rounded-xl p-6 border-2 border-white/30 hover:bg-white/30 transition-all">
+                    <div className="text-4xl mb-3 text-center">📊</div>
+                    <h3 className="text-2xl font-bold text-white mb-2 text-center">Tax Practice</h3>
+                    <p className="text-white/70 text-sm mb-4 text-center">
+                      Master tax calculations through 50 levels
+                    </p>
+                    <div className="text-white/90 text-center mb-4">
+                      <div className="text-sm">Current Level</div>
+                      <div className="text-3xl font-bold">{taxPracticeLevel}/50</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setHomeMenuMode('taxPractice');
+                        setCurrentTaxProblem(generateTaxProblem(taxPracticeLevel));
+                      }}
+                      className="w-full px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white text-lg font-bold rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all"
+                    >
+                      Practice Taxes
+                    </button>
+                  </div>
+
+                  {/* Cooking Practice */}
+                  <div className="bg-white/20 rounded-xl p-6 border-2 border-white/30 hover:bg-white/30 transition-all">
+                    <div className="text-4xl mb-3 text-center">👨‍🍳</div>
+                    <h3 className="text-2xl font-bold text-white mb-2 text-center">Cooking Challenge</h3>
+                    <p className="text-white/70 text-sm mb-4 text-center">
+                      Create meals on budget with the right calories
+                    </p>
+                    <div className="text-white/90 text-center mb-4">
+                      <div className="text-sm">Current Level</div>
+                      <div className="text-3xl font-bold">{cookingLevel}/50</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setHomeMenuMode('cookingPractice');
+                        setCurrentCookingChallenge(generateCookingChallenge(cookingLevel));
+                        setSelectedIngredients([]);
+                      }}
+                      className="w-full px-6 py-3 bg-gradient-to-r from-pink-500 to-red-500 text-white text-lg font-bold rounded-lg hover:from-pink-600 hover:to-red-600 transition-all"
+                    >
+                      Start Cooking
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-8 text-white/70 text-sm">
+                  <p className="mb-2">⚠️ Game Features:</p>
+                  <ul className="list-disc list-inside space-y-1 grid grid-cols-2 gap-x-4">
+                    <li>Real tax calculations (federal, state, FICA)</li>
+                    <li>Credit scores and debt management</li>
+                    <li>Monthly bills that don't care about your feelings</li>
+                    <li>Retirement planning (because you'll need it)</li>
+                    <li>Random life events (like real life!)</li>
+                    <li>🗳️ Civic engagement & elections with NPCs</li>
+                    <li>👥 Social connections that influence your world</li>
+                    <li>🎓 Practice modes to learn essential skills</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // TAX PRACTICE MODE
+        if (homeMenuMode === 'taxPractice' && currentTaxProblem) {
+          const correctAnswer = calculateTaxAnswer(currentTaxProblem);
+          
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-yellow-900 via-orange-900 to-red-900 flex items-center justify-center p-4">
+              <div className="max-w-3xl w-full bg-white/10 backdrop-blur-lg rounded-3xl p-8 border-2 border-white/20">
+                <div className="flex justify-between items-center mb-6">
+                  <button
+                    onClick={() => {
+                      setHomeMenuMode('main');
+                      setCurrentTaxProblem(null);
+                      setShowTaxResult(false);
+                    }}
+                    className="px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30"
+                  >
+                    ← Back to Menu
+                  </button>
+                  <div className="text-white text-xl font-bold">
+                    Level {taxPracticeLevel}/50
+                  </div>
+                </div>
+
+                <h2 className="text-4xl font-black text-white mb-6 text-center">
+                  📊 Tax Practice
+                </h2>
+
+                <div className="bg-white/20 rounded-xl p-6 mb-6">
+                  <h3 className="text-2xl font-bold text-white mb-4">Tax Scenario</h3>
+                  <div className="space-y-2 text-white/90">
+                    <div className="flex justify-between">
+                      <span>Annual Income:</span>
+                      <span className="font-bold">{formatMoney(currentTaxProblem.income)}</span>
+                    </div>
+                    {currentTaxProblem.contribution401k > 0 && (
+                      <div className="flex justify-between">
+                        <span>401(k) Contribution:</span>
+                        <span className="font-bold">{formatMoney(currentTaxProblem.contribution401k)}</span>
+                      </div>
+                    )}
+                    {currentTaxProblem.studentLoanInterest > 0 && (
+                      <div className="flex justify-between">
+                        <span>Student Loan Interest Paid:</span>
+                        <span className="font-bold">{formatMoney(currentTaxProblem.studentLoanInterest)}</span>
+                      </div>
+                    )}
+                    {currentTaxProblem.mortgageInterest > 0 && (
+                      <div className="flex justify-between">
+                        <span>Mortgage Interest Paid:</span>
+                        <span className="font-bold">{formatMoney(currentTaxProblem.mortgageInterest)}</span>
+                      </div>
+                    )}
+                    {currentTaxProblem.charitableDonations > 0 && (
+                      <div className="flex justify-between">
+                        <span>Charitable Donations:</span>
+                        <span className="font-bold">{formatMoney(currentTaxProblem.charitableDonations)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-white/30 pt-2">
+                      <span>Filing Status:</span>
+                      <span className="font-bold capitalize">{currentTaxProblem.filingStatus}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* HINT BOX */}
+                <div className="bg-blue-500/30 border-2 border-blue-400/50 rounded-xl p-6 mb-6">
+                  <h3 className="text-xl font-bold text-white mb-3">💡 How to Calculate</h3>
+                  <div className="space-y-2 text-sm text-white/90">
+                    <div><strong>Step 1:</strong> Start with Annual Income: {formatMoney(currentTaxProblem.income)}</div>
+                    
+                    {currentTaxProblem.contribution401k > 0 && (
+                      <div><strong>Step 2:</strong> Subtract 401(k) → {formatMoney(currentTaxProblem.income - currentTaxProblem.contribution401k)} (reduces taxable income)</div>
+                    )}
+                    
+                    <div><strong>Step {currentTaxProblem.contribution401k > 0 ? '3' : '2'}:</strong> Subtract Standard Deduction ({currentTaxProblem.filingStatus === 'married' ? '$27,700' : '$13,850'})</div>
+                    
+                    {(currentTaxProblem.mortgageInterest > 0 || currentTaxProblem.charitableDonations > 0 || currentTaxProblem.studentLoanInterest > 0) && (
+                      <div className="bg-white/10 rounded p-2 mt-2">
+                        <div className="font-bold mb-1">📋 Itemized Deductions Available:</div>
+                        {currentTaxProblem.studentLoanInterest > 0 && <div>• Student Loan Interest: {formatMoney(currentTaxProblem.studentLoanInterest)}</div>}
+                        {currentTaxProblem.mortgageInterest > 0 && <div>• Mortgage Interest: {formatMoney(currentTaxProblem.mortgageInterest)}</div>}
+                        {currentTaxProblem.charitableDonations > 0 && <div>• Charitable Donations: {formatMoney(currentTaxProblem.charitableDonations)}</div>}
+                        <div className="text-yellow-300 mt-1">⚠️ Use itemized ONLY if total exceeds standard deduction!</div>
+                      </div>
+                    )}
+                    
+                    <div><strong>Step {currentTaxProblem.contribution401k > 0 ? '4' : '3'}:</strong> Calculate Federal Tax using tax brackets</div>
+                    <div><strong>Step {currentTaxProblem.contribution401k > 0 ? '5' : '4'}:</strong> Calculate State Tax (5% of taxable income)</div>
+                    <div><strong>Step {currentTaxProblem.contribution401k > 0 ? '6' : '5'}:</strong> Calculate FICA (7.65% of gross income)</div>
+                    <div className="border-t border-white/30 pt-2 mt-2">
+                      <strong>Final Step:</strong> Add Federal + State + FICA = Total Tax
+                    </div>
+                  </div>
+                </div>
+
+                {!showTaxResult ? (
+                  <div className="bg-white/20 rounded-xl p-6">
+                    <h3 className="text-xl font-bold text-white mb-4">
+                      Calculate the Total Tax Owed (Federal + State + FICA)
+                    </h3>
+                    
+                    <div className="bg-yellow-500/20 border border-yellow-400/50 rounded-lg p-3 mb-4 text-sm text-white">
+                      💡 <strong>Quick Hint:</strong> For a rough estimate, multiply your income by 0.20-0.30 (20-30%). Then refine!
+                    </div>
+                    
+                    <input
+                      type="number"
+                      placeholder="Enter total tax amount..."
+                      value={taxAnswer}
+                      onChange={(e) => setTaxAnswer(e.target.value)}
+                      className="w-full px-6 py-4 text-2xl rounded-xl border-2 border-white/30 bg-white/10 text-white placeholder-white/50 mb-4"
+                      onKeyPress={(e) => e.key === 'Enter' && taxAnswer && setShowTaxResult(true)}
+                    />
+                    <button
+                      onClick={() => setShowTaxResult(true)}
+                      disabled={!taxAnswer}
+                      className="w-full px-8 py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white text-xl font-bold rounded-xl hover:from-green-600 hover:to-blue-600 disabled:opacity-50 transition-all"
+                    >
+                      Submit Answer
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white/20 rounded-xl p-6">
+                    <h3 className="text-2xl font-bold text-white mb-4">Results</h3>
+                    
+                    <div className="space-y-3 text-white/90 mb-6">
+                      <div className="flex justify-between">
+                        <span>Your Answer:</span>
+                        <span className="font-bold">{formatMoney(parseFloat(taxAnswer))}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Correct Answer:</span>
+                        <span className="font-bold">{formatMoney(correctAnswer.totalTax)}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-white/30 pt-2">
+                        <span>Difference:</span>
+                        <span className={`font-bold ${Math.abs(parseFloat(taxAnswer) - correctAnswer.totalTax) < 100 ? 'text-green-400' : 'text-red-400'}`}>
+                          {formatMoney(Math.abs(parseFloat(taxAnswer) - correctAnswer.totalTax))}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="bg-white/10 rounded-lg p-4 mb-6">
+                      <h4 className="text-lg font-bold text-white mb-2">Breakdown:</h4>
+                      <div className="space-y-1 text-sm text-white/80">
+                        <div className="flex justify-between">
+                          <span>Adjusted Income:</span>
+                          <span>{formatMoney(correctAnswer.adjustedIncome)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Taxable Income:</span>
+                          <span>{formatMoney(correctAnswer.taxableIncome)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Federal Tax:</span>
+                          <span>{formatMoney(correctAnswer.federalTax)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>State Tax:</span>
+                          <span>{formatMoney(correctAnswer.stateTax)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>FICA (Social Security + Medicare):</span>
+                          <span>{formatMoney(correctAnswer.fica)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {Math.abs(parseFloat(taxAnswer) - correctAnswer.totalTax) < 100 ? (
+                      <div>
+                        <div className="text-center text-3xl font-bold text-green-400 mb-4">
+                          ✅ Excellent! You passed!
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (taxPracticeLevel < 50) {
+                              setTaxPracticeLevel(prev => prev + 1);
+                              setCurrentTaxProblem(generateTaxProblem(taxPracticeLevel + 1));
+                            } else {
+                              setCurrentTaxProblem(generateTaxProblem(50));
+                            }
+                            setTaxAnswer('');
+                            setShowTaxResult(false);
+                          }}
+                          className="w-full px-8 py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white text-xl font-bold rounded-xl hover:from-green-600 hover:to-blue-600"
+                        >
+                          {taxPracticeLevel < 50 ? 'Next Level →' : 'Try Level 50 Again'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-center text-3xl font-bold text-red-400 mb-4">
+                          ❌ Not quite! Try again.
+                        </div>
+                        <button
+                          onClick={() => {
+                            setTaxAnswer('');
+                            setShowTaxResult(false);
+                          }}
+                          className="w-full px-8 py-4 bg-gradient-to-r from-yellow-500 to-orange-500 text-white text-xl font-bold rounded-xl hover:from-yellow-600 hover:to-orange-600"
+                        >
+                          Try Again
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        // COOKING PRACTICE MODE
+        if (homeMenuMode === 'cookingPractice' && currentCookingChallenge) {
+          const totalCost = selectedIngredients.reduce((sum, ing) => sum + ing.cost, 0);
+          const totalCalories = selectedIngredients.reduce((sum, ing) => sum + ing.calories, 0);
+          
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-pink-900 via-red-900 to-orange-900 flex items-center justify-center p-4">
+              <div className="max-w-5xl w-full bg-white/10 backdrop-blur-lg rounded-3xl p-8 border-2 border-white/20">
+                <div className="flex justify-between items-center mb-6">
+                  <button
+                    onClick={() => {
+                      setHomeMenuMode('main');
+                      setCurrentCookingChallenge(null);
+                      setSelectedIngredients([]);
+                      setShowCookingResult(false);
+                    }}
+                    className="px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30"
+                  >
+                    ← Back to Menu
+                  </button>
+                  <div className="text-white text-xl font-bold">
+                    Level {cookingLevel}/50
+                  </div>
+                </div>
+
+                <h2 className="text-4xl font-black text-white mb-6 text-center">
+                  👨‍🍳 Cooking Challenge
+                </h2>
+
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="bg-green-500/30 rounded-xl p-4 text-center">
+                    <div className="text-sm text-white/70">Budget</div>
+                    <div className="text-2xl font-bold text-white">{formatMoney(currentCookingChallenge.budget)}</div>
+                    <div className="text-sm text-white/90 mt-1">Current: {formatMoney(totalCost)}</div>
+                  </div>
+                  <div className="bg-blue-500/30 rounded-xl p-4 text-center">
+                    <div className="text-sm text-white/70">Calorie Target</div>
+                    <div className="text-2xl font-bold text-white">
+                      {currentCookingChallenge.calorieMin}-{currentCookingChallenge.calorieMax}
+                    </div>
+                    <div className="text-sm text-white/90 mt-1">Current: {totalCalories}</div>
+                  </div>
+                  <div className="bg-purple-500/30 rounded-xl p-4 text-center">
+                    <div className="text-sm text-white/70">Servings</div>
+                    <div className="text-2xl font-bold text-white">{currentCookingChallenge.servings}</div>
+                    <div className="text-sm text-white/90 mt-1">Per serving goals</div>
+                  </div>
+                </div>
+
+                {!showCookingResult ? (
+                  <div>
+                    <div className="bg-yellow-500/30 border-2 border-yellow-400/50 rounded-xl p-4 mb-4">
+                      <h4 className="text-lg font-bold text-white mb-2">🍳 Cooking Tips:</h4>
+                      <ul className="space-y-1 text-sm text-white/90">
+                        <li>✓ <strong>Balance is key!</strong> Pick 1 protein + 1 carb + 1 veggie for best taste score</li>
+                        <li>✓ Add garlic or onion for extra flavor points</li>
+                        <li>✓ Include olive oil or butter to improve taste</li>
+                        <li>✓ Stay close to the budget (over or under is okay, just not too far)</li>
+                        <li>✓ Aim for the middle of the calorie range</li>
+                      </ul>
+                    </div>
+
+                    <div className="bg-white/20 rounded-xl p-6 mb-4">
+                      <h3 className="text-xl font-bold text-white mb-4">Available Ingredients</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {currentCookingChallenge.ingredients.map((ing, idx) => {
+                          const isSelected = selectedIngredients.find(i => i.name === ing.name);
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedIngredients(prev => prev.filter(i => i.name !== ing.name));
+                                } else {
+                                  setSelectedIngredients(prev => [...prev, ing]);
+                                }
+                              }}
+                              className={`p-3 rounded-lg transition-all ${
+                                isSelected
+                                  ? 'bg-green-500 text-white border-2 border-green-300'
+                                  : 'bg-white/30 text-white border-2 border-white/20 hover:bg-white/40'
+                              }`}
+                            >
+                              <div className="font-bold text-sm">{ing.name}</div>
+                              <div className="text-xs mt-1">{formatMoney(ing.cost)}</div>
+                              <div className="text-xs">{ing.calories} cal</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="bg-white/20 rounded-xl p-6 mb-4">
+                      <h3 className="text-xl font-bold text-white mb-3">Selected Ingredients ({selectedIngredients.length})</h3>
+                      {selectedIngredients.length === 0 ? (
+                        <p className="text-white/70">No ingredients selected yet...</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {selectedIngredients.map((ing, idx) => (
+                            <span key={idx} className="px-3 py-1 bg-green-500 text-white rounded-lg text-sm">
+                              {ing.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const result = gradeCookingAttempt(currentCookingChallenge, selectedIngredients);
+                        setCookingScore(result);
+                        setShowCookingResult(true);
+                      }}
+                      disabled={selectedIngredients.length === 0}
+                      className="w-full px-8 py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white text-xl font-bold rounded-xl hover:from-green-600 hover:to-blue-600 disabled:opacity-50 transition-all"
+                    >
+                      Cook & Get Graded!
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white/20 rounded-xl p-6">
+                    <div className="text-center mb-6">
+                      <div className="text-6xl font-black text-white mb-2">
+                        Grade: {cookingScore.grade}
+                      </div>
+                      <div className="text-2xl text-white/80">
+                        Overall: {cookingScore.overallScore}/100
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 mb-6">
+                      <div className="bg-white/10 rounded-lg p-4 text-center">
+                        <div className="text-sm text-white/70">Taste</div>
+                        <div className="text-3xl font-bold text-white">{cookingScore.tasteScore}</div>
+                        {cookingScore.balanced && <div className="text-xs text-green-400 mt-1">✓ Balanced!</div>}
+                      </div>
+                      <div className="bg-white/10 rounded-lg p-4 text-center">
+                        <div className="text-sm text-white/70">Price</div>
+                        <div className="text-3xl font-bold text-white">{cookingScore.priceScore}</div>
+                        <div className="text-xs text-white/80 mt-1">{formatMoney(cookingScore.totalCost)}</div>
+                      </div>
+                      <div className="bg-white/10 rounded-lg p-4 text-center">
+                        <div className="text-sm text-white/70">Calories</div>
+                        <div className="text-3xl font-bold text-white">{cookingScore.calorieScore}</div>
+                        <div className="text-xs text-white/80 mt-1">{cookingScore.totalCalories} cal</div>
+                      </div>
+                    </div>
+
+                    {cookingScore.grade !== 'F' && cookingScore.grade !== 'D' ? (
+                      <button
+                        onClick={() => {
+                          if (cookingLevel < 50) {
+                            setCookingLevel(prev => prev + 1);
+                            setCurrentCookingChallenge(generateCookingChallenge(cookingLevel + 1));
+                          } else {
+                            setCurrentCookingChallenge(generateCookingChallenge(50));
+                          }
+                          setSelectedIngredients([]);
+                          setShowCookingResult(false);
+                        }}
+                        className="w-full px-8 py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white text-xl font-bold rounded-xl hover:from-green-600 hover:to-blue-600"
+                      >
+                        {cookingLevel < 50 ? 'Next Level →' : 'Try Level 50 Again'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setSelectedIngredients([]);
+                          setShowCookingResult(false);
+                        }}
+                        className="w-full px-8 py-4 bg-gradient-to-r from-yellow-500 to-orange-500 text-white text-xl font-bold rounded-xl hover:from-yellow-600 hover:to-orange-600"
+                      >
+                        Try Again
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        // Fallback
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center p-4">
+            <div className="max-w-2xl w-full bg-white/10 backdrop-blur-lg rounded-3xl p-8 border-2 border-white/20">
+              <h1 className="text-6xl font-black text-white mb-4 text-center">
+                Adult Life Simulator
+              </h1>
+              <p className="text-xl text-white/80 mb-8 text-center">
+                Experience the joy of taxes, bills, and budgeting!
+              </p>
+
+              <input
+                type="text"
+                placeholder="Enter your name..."
+                value={player.name}
+                onChange={(e) => setPlayer({...player, name: e.target.value})}
+                className="w-full px-6 py-4 text-lg rounded-xl border-2 border-white/30 bg-white/10 text-white placeholder-white/50 mb-6"
+                onKeyPress={(e) => e.key === 'Enter' && startGame()}
+              />
+
+              <button
+                onClick={startGame}
+                disabled={!player.name}
+                className="w-full px-8 py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white text-xl font-bold rounded-xl hover:from-green-600 hover:to-blue-600 disabled:opacity-50 transition-all"
+              >
+                Start Adulting
+              </button>
+
+              <div className="mt-8 text-white/70 text-sm">
+                <p className="mb-2">⚠️ Warning: This game includes:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Real tax calculations (federal, state, FICA)</li>
+                  <li>Credit scores and debt management</li>
+                  <li>Monthly bills that don't care about your feelings</li>
+                  <li>Retirement planning (because you'll need it)</li>
+                  <li>Random life events (like real life!)</li>
+                  <li>🗳️ Civic engagement & elections with NPCs</li>
+                  <li>👥 Social connections that influence your world</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      const monthlyExpenses = calculateMonthlyExpenses(player);
+      const netWorth = player.checkingAccount + player.savingsAccount + player.retirement401k + 
+                      player.rothIRA + player.homeEquity - 
+                      player.creditCards.reduce((sum, card) => sum + card.balance, 0) -
+                      player.studentLoans.reduce((sum, loan) => sum + loan.balance, 0) -
+                      (player.carLoan ? player.carLoan.balance : 0) -
+                      (player.mortgage ? player.mortgage.balance : 0);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+          {/* Header */}
+          <div className="bg-white shadow-lg border-b-2 border-slate-200">
+            <div className="max-w-7xl mx-auto px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-black text-slate-800">{player.name}</h1>
+                  <p className="text-slate-600">
+                    {new Date(player.year, player.month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    {' • '}Age {player.age}
+                  </p>
+                </div>
+
+                <div className="flex gap-4">
+                  <div className="text-right">
+                    <div className="text-sm text-slate-500">Net Worth</div>
+                    <div className={`text-2xl font-bold ${netWorth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatMoney(netWorth)}
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div className="text-sm text-slate-500">Credit Score</div>
+                    <div className={`text-2xl font-bold ${
+                      player.creditScore >= 700 ? 'text-green-600' : 
+                      player.creditScore >= 600 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {player.creditScore}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="max-w-7xl mx-auto p-6">
+            <div className="grid grid-cols-3 gap-6 mb-6">
+              {/* Checking Account */}
+              <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-slate-200">
+                <div className="text-sm text-slate-500 mb-2">Checking Account</div>
+                <div className={`text-3xl font-bold ${player.checkingAccount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatMoney(player.checkingAccount)}
+                </div>
+              </div>
+
+              {/* Savings Account */}
+              <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-slate-200">
+                <div className="text-sm text-slate-500 mb-2">Savings Account</div>
+                <div className="text-3xl font-bold text-blue-600">
+                  {formatMoney(player.savingsAccount)}
+                </div>
+              </div>
+
+              {/* Monthly Income */}
+              <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-slate-200">
+                <div className="text-sm text-slate-500 mb-2">Monthly Income (After Tax)</div>
+                <div className="text-3xl font-bold text-purple-600">
+                  {formatMoney(player.monthlyIncome)}
+                </div>
+              </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex gap-2 mb-6">
+              {['main', 'budget', 'career', 'debt', 'retirement', 'taxes', 'civic'].map(screen => (
+                <button
+                  key={screen}
+                  onClick={() => setCurrentScreen(screen)}
+                  className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                    currentScreen === screen
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {screen.charAt(0).toUpperCase() + screen.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Screen Content */}
+            <div className="bg-white rounded-xl shadow-lg p-8">
+              {currentScreen === 'main' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
+                  
+                  <div className="grid grid-cols-2 gap-6 mb-6">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-3">Employment</h3>
+                      {player.job ? (
+                        <div className="space-y-2">
+                          <p><strong>Job:</strong> {player.job.title}</p>
+                          <p><strong>Hourly Wage:</strong> {formatMoney(player.hourlyWage)}/hr</p>
+                          <p><strong>Hours/Week:</strong> {player.hoursPerWeek}</p>
+                          <p><strong>Annual Salary:</strong> {formatMoney(player.hourlyWage * player.hoursPerWeek * 52)}</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-red-600 font-semibold mb-2">Unemployed</p>
+                          <p className="text-sm text-slate-600">Weeks unemployed: {player.unemploymentWeeks}</p>
+                          <button
+                            onClick={() => setCurrentScreen('career')}
+                            className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                          >
+                            Find a Job
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-semibold mb-3">Monthly Expenses</h3>
+                      <div className="space-y-1 text-sm">
+                        <div className="flex justify-between">
+                          <span>Housing:</span>
+                          <span className="font-semibold">{formatMoney(monthlyExpenses.housing)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Utilities:</span>
+                          <span className="font-semibold">{formatMoney(monthlyExpenses.utilities)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Phone/Internet:</span>
+                          <span className="font-semibold">{formatMoney(monthlyExpenses.phoneInternet)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Groceries:</span>
+                          <span className="font-semibold">{formatMoney(monthlyExpenses.groceries)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Transportation:</span>
+                          <span className="font-semibold">{formatMoney(monthlyExpenses.transportation)}</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-1 mt-2">
+                          <span className="font-bold">Total:</span>
+                          <span className="font-bold text-red-600">{formatMoney(monthlyExpenses.total)}</span>
+                        </div>
+                        <div className="flex justify-between text-green-600 font-semibold">
+                          <span>Left Over:</span>
+                          <span>{formatMoney(player.monthlyIncome - monthlyExpenses.total)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-blue-50 rounded-lg p-4">
+                      <div className="text-sm text-slate-600 mb-1">Stress Level</div>
+                      <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-red-500 transition-all"
+                          style={{ width: `${player.stress}%` }}
+                        />
+                      </div>
+                      <div className="text-sm text-right mt-1">{player.stress.toFixed(0)}%</div>
+                    </div>
+
+                    <div className="bg-green-50 rounded-lg p-4">
+                      <div className="text-sm text-slate-600 mb-1">Energy</div>
+                      <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-green-500 transition-all"
+                          style={{ width: `${player.energy}%` }}
+                        />
+                      </div>
+                      <div className="text-sm text-right mt-1">{player.energy.toFixed(0)}%</div>
+                    </div>
+
+                    <div className="bg-purple-50 rounded-lg p-4">
+                      <div className="text-sm text-slate-600 mb-1">Health</div>
+                      <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-purple-500 transition-all"
+                          style={{ width: `${player.health}%` }}
+                        />
+                      </div>
+                      <div className="text-sm text-right mt-1">{player.health.toFixed(0)}%</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {currentScreen === 'budget' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Budget & Expenses</h2>
+                  
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold mb-3">Monthly Cash Flow</h3>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-lg">
+                        <span className="text-green-600">Income:</span>
+                        <span className="font-bold text-green-600">+{formatMoney(player.monthlyIncome)}</span>
+                      </div>
+                      <div className="flex justify-between text-lg">
+                        <span className="text-red-600">Expenses:</span>
+                        <span className="font-bold text-red-600">-{formatMoney(monthlyExpenses.total)}</span>
+                      </div>
+                      <div className="flex justify-between text-xl border-t-2 pt-2">
+                        <span className="font-bold">Net:</span>
+                        <span className={`font-bold ${
+                          player.monthlyIncome - monthlyExpenses.total >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {formatMoney(player.monthlyIncome - monthlyExpenses.total)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-4">Expense Breakdown</h3>
+                    {Object.entries(monthlyExpenses).map(([category, amount]) => {
+                      if (category === 'total') return null;
+                      const percentage = monthlyExpenses.total > 0 ? (amount / monthlyExpenses.total) * 100 : 0;
+                      
+                      return (
+                        <div key={category} className="mb-3">
+                          <div className="flex justify-between mb-1">
+                            <span className="capitalize">{category.replace(/([A-Z])/g, ' $1').trim()}:</span>
+                            <span className="font-semibold">{formatMoney(amount)} ({percentage.toFixed(1)}%)</span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {currentScreen === 'career' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Career & Employment</h2>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    {jobMarket.map(job => {
+                      const annualSalary = job.wage * job.hours * 52;
+                      const monthlyGross = annualSalary / 12;
+                      
+                      return (
+                        <div key={job.id} className="bg-slate-50 rounded-lg p-6 border-2 border-slate-200">
+                          <h3 className="text-xl font-bold mb-2">{job.title}</h3>
+                          <div className="space-y-2 mb-4">
+                            <p><strong>Hourly:</strong> {formatMoney(job.wage)}/hr</p>
+                            <p><strong>Hours:</strong> {job.hours}/week</p>
+                            <p><strong>Annual Salary:</strong> {formatMoney(annualSalary)}</p>
+                            <p><strong>Monthly (Gross):</strong> {formatMoney(monthlyGross)}</p>
+                            <p><strong>Benefits:</strong> {job.benefits ? '✅ Yes' : '❌ No'}</p>
+                            {job.match && <p><strong>401k Match:</strong> {(job.match * 100).toFixed(1)}%</p>}
+                          </div>
+                          <button
+                            onClick={() => getJob(job)}
+                            disabled={player.job?.id === job.id}
+                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {player.job?.id === job.id ? 'Current Job' : 'Apply'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {currentScreen === 'debt' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Debt & Credit</h2>
+                  
+                  <div className="mb-6">
+                    <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg p-6 mb-6">
+                      <h3 className="text-2xl font-bold mb-2">Credit Score: {player.creditScore}</h3>
+                      <p className="text-sm opacity-90">
+                        {player.creditScore >= 800 ? 'Exceptional' :
+                         player.creditScore >= 740 ? 'Very Good' :
+                         player.creditScore >= 670 ? 'Good' :
+                         player.creditScore >= 580 ? 'Fair' : 'Poor'}
+                      </p>
+                      <div className="mt-4 text-sm space-y-1">
+                        <p>On-time payments: {player.onTimePayments.toFixed(0)}%</p>
+                        <p>Credit utilization: {player.creditUtilization.toFixed(1)}%</p>
+                        <p>Account age: {Math.floor(player.creditAccountAge / 12)} years {player.creditAccountAge % 12} months</p>
+                        <p>Hard inquiries: {player.hardInquiries}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                      <button
+                        onClick={openCreditCard}
+                        className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700"
+                      >
+                        Apply for Credit Card
+                      </button>
+                    </div>
+                  </div>
+
+                  <h3 className="text-lg font-semibold mb-3">Credit Cards</h3>
+                  {player.creditCards.length === 0 ? (
+                    <p className="text-slate-600 mb-6">No credit cards yet.</p>
+                  ) : (
+                    <div className="space-y-3 mb-6">
+                      {player.creditCards.map((card, idx) => (
+                        <div key={idx} className="bg-slate-50 rounded-lg p-4">
+                          <div className="flex justify-between mb-2">
+                            <span className="font-semibold">{card.name}</span>
+                            <span className="text-sm">APR: {card.apr}%</span>
+                          </div>
+                          <div className="flex justify-between text-sm mb-2">
+                            <span>Balance: {formatMoney(card.balance)}</span>
+                            <span>Limit: {formatMoney(card.limit)}</span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden mb-3">
+                            <div
+                              className={`h-full ${
+                                (card.balance / card.limit) > 0.8 ? 'bg-red-500' :
+                                (card.balance / card.limit) > 0.5 ? 'bg-yellow-500' : 'bg-green-500'
+                              }`}
+                              style={{ width: `${(card.balance / card.limit) * 100}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-slate-600 mb-3">
+                            Utilization: {((card.balance / card.limit) * 100).toFixed(1)}%
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => makeExtraPayment('creditCard', idx, Math.min(100, card.balance))}
+                              disabled={player.checkingAccount < 100 || card.balance === 0}
+                              className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Pay $100
+                            </button>
+                            <button
+                              onClick={() => makeExtraPayment('creditCard', idx, Math.min(500, card.balance))}
+                              disabled={player.checkingAccount < 500 || card.balance === 0}
+                              className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Pay $500
+                            </button>
+                            <button
+                              onClick={() => makeExtraPayment('creditCard', idx, card.balance)}
+                              disabled={player.checkingAccount < card.balance || card.balance === 0}
+                              className="px-3 py-2 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Pay Full
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <h3 className="text-lg font-semibold mb-3">Student Loans</h3>
+                  {player.studentLoans.length === 0 ? (
+                    <p className="text-slate-600 mb-6">No student loans.</p>
+                  ) : (
+                    <div className="space-y-3 mb-6">
+                      {player.studentLoans.map((loan, idx) => (
+                        <div key={idx} className="bg-red-50 rounded-lg p-4 border-2 border-red-200">
+                          <div className="flex justify-between mb-2">
+                            <span className="font-semibold">{loan.name}</span>
+                            <span className="text-sm">APR: {loan.apr}%</span>
+                          </div>
+                          <div className="flex justify-between text-sm mb-2">
+                            <span>Balance: {formatMoney(loan.balance)}</span>
+                            <span>Monthly Payment: {formatMoney(loan.payment)}</span>
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => makeExtraPayment('studentLoan', idx, Math.min(500, loan.balance))}
+                              disabled={player.checkingAccount < 500 || loan.balance === 0}
+                              className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Pay $500
+                            </button>
+                            <button
+                              onClick={() => makeExtraPayment('studentLoan', idx, Math.min(1000, loan.balance))}
+                              disabled={player.checkingAccount < 1000 || loan.balance === 0}
+                              className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Pay $1000
+                            </button>
+                            <button
+                              onClick={() => makeExtraPayment('studentLoan', idx, loan.balance)}
+                              disabled={player.checkingAccount < loan.balance || loan.balance === 0}
+                              className="px-3 py-2 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Pay Full
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {player.carLoan && (
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold mb-3">Car Loan</h3>
+                      <div className="bg-orange-50 rounded-lg p-4 border-2 border-orange-200">
+                        <div className="flex justify-between mb-2">
+                          <span className="font-semibold">Auto Loan</span>
+                          <span className="text-sm">APR: {player.carLoan.apr}%</span>
+                        </div>
+                        <div className="flex justify-between text-sm mb-2">
+                          <span>Balance: {formatMoney(player.carLoan.balance)}</span>
+                          <span>Monthly Payment: {formatMoney(player.carLoan.payment)}</span>
+                        </div>
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => makeExtraPayment('carLoan', 0, Math.min(500, player.carLoan.balance))}
+                            disabled={player.checkingAccount < 500 || player.carLoan.balance === 0}
+                            className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Pay $500
+                          </button>
+                          <button
+                            onClick={() => makeExtraPayment('carLoan', 0, Math.min(1000, player.carLoan.balance))}
+                            disabled={player.checkingAccount < 1000 || player.carLoan.balance === 0}
+                            className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Pay $1000
+                          </button>
+                          <button
+                            onClick={() => makeExtraPayment('carLoan', 0, player.carLoan.balance)}
+                            disabled={player.checkingAccount < player.carLoan.balance || player.carLoan.balance === 0}
+                            className="px-3 py-2 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Pay Full
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {player.mortgage && (
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold mb-3">Mortgage</h3>
+                      <div className="bg-blue-50 rounded-lg p-4 border-2 border-blue-200">
+                        <div className="flex justify-between mb-2">
+                          <span className="font-semibold">Home Mortgage</span>
+                          <span className="text-sm">APR: {player.mortgage.apr}%</span>
+                        </div>
+                        <div className="flex justify-between text-sm mb-2">
+                          <span>Balance: {formatMoney(player.mortgage.balance)}</span>
+                          <span>Monthly Payment: {formatMoney(player.mortgage.payment)}</span>
+                        </div>
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => makeExtraPayment('mortgage', 0, Math.min(1000, player.mortgage.balance))}
+                            disabled={player.checkingAccount < 1000 || player.mortgage.balance === 0}
+                            className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Pay $1,000
+                          </button>
+                          <button
+                            onClick={() => makeExtraPayment('mortgage', 0, Math.min(5000, player.mortgage.balance))}
+                            disabled={player.checkingAccount < 5000 || player.mortgage.balance === 0}
+                            className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Pay $5,000
+                          </button>
+                          <button
+                            onClick={() => makeExtraPayment('mortgage', 0, player.mortgage.balance)}
+                            disabled={player.checkingAccount < player.mortgage.balance || player.mortgage.balance === 0}
+                            className="px-3 py-2 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Pay Full
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {currentScreen === 'retirement' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Retirement Planning</h2>
+                  
+                  <div className="grid grid-cols-2 gap-6 mb-6">
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-700 text-white rounded-lg p-6">
+                      <h3 className="text-lg mb-2">401(k) Balance</h3>
+                      <p className="text-3xl font-bold">{formatMoney(player.retirement401k)}</p>
+                      {player.has401k && (
+                        <p className="text-sm mt-2 opacity-90">
+                          Contributing: {player.contributionPercent}%
+                          {player.job?.match && ` (Employer match: ${(player.job.match * 100).toFixed(1)}%)`}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="bg-gradient-to-br from-purple-500 to-purple-700 text-white rounded-lg p-6">
+                      <h3 className="text-lg mb-2">Roth IRA Balance</h3>
+                      <p className="text-3xl font-bold">{formatMoney(player.rothIRA)}</p>
+                      <p className="text-sm mt-2 opacity-90">Tax-free growth</p>
+                    </div>
+                  </div>
+
+                  {player.has401k ? (
+                    <div className="bg-slate-50 rounded-lg p-6 mb-6">
+                      <h3 className="text-lg font-semibold mb-4">401(k) Contribution Settings</h3>
+                      <div className="space-y-3">
+                        {[0, 3, 5, 10, 15].map(percent => (
+                          <button
+                            key={percent}
+                            onClick={() => start401k(percent)}
+                            className={`w-full px-4 py-3 rounded-lg font-semibold transition-all ${
+                              player.contributionPercent === percent
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border-2 border-slate-200 hover:border-blue-400'
+                            }`}
+                          >
+                            {percent}% Contribution
+                            {percent > 0 && player.job?.match && percent >= (player.job.match * 100) && (
+                              <span className="ml-2 text-sm">✨ Full Match</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-6 mb-6">
+                      <p className="text-yellow-800 font-semibold">
+                        ⚠️ Your current job doesn't offer a 401(k). Consider finding a job with benefits!
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="bg-blue-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-3">Retirement Planning Tips</h3>
+                    <ul className="space-y-2 text-sm text-slate-700">
+                      <li>💡 Try to save at least 15% of your income for retirement</li>
+                      <li>💡 Always contribute enough to get full employer match (free money!)</li>
+                      <li>💡 Starting early matters - compound interest is powerful</li>
+                      <li>💡 Roth IRA contributions are made after-tax but grow tax-free</li>
+                      <li>💡 401(k) contributions reduce your taxable income</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {currentScreen === 'taxes' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Taxes & Withholding</h2>
+                  
+                  <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold text-red-800 mb-3">Tax Year {player.year}</h3>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span>Year-to-date Income:</span>
+                        <span className="font-bold">{formatMoney(player.yearToDateIncome)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Taxes Withheld:</span>
+                        <span className="font-bold">{formatMoney(player.taxesPaid)}</span>
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span>Estimated Tax Liability:</span>
+                        <span className="font-bold">
+                          {formatMoney(
+                            calculateFederalTax(player.yearToDateIncome) + 
+                            calculateStateTax(player.yearToDateIncome)
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-lg">
+                        <span className="font-bold">Estimated Refund/Owed:</span>
+                        <span className={`font-bold ${
+                          player.taxesPaid - (calculateFederalTax(player.yearToDateIncome) + 
+                          calculateStateTax(player.yearToDateIncome)) > 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {formatMoney(
+                            player.taxesPaid - (calculateFederalTax(player.yearToDateIncome) + 
+                            calculateStateTax(player.yearToDateIncome))
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {player.job && (
+                    <div className="bg-slate-50 rounded-lg p-6 mb-6">
+                      <h3 className="text-lg font-semibold mb-4">Paycheck Breakdown (Monthly)</h3>
+                      {(() => {
+                        const grossMonthly = player.hourlyWage * player.hoursPerWeek * 4.33;
+                        const annualGross = grossMonthly * 12;
+                        const federalTax = calculateFederalTax(annualGross) / 12;
+                        const stateTax = calculateStateTax(annualGross) / 12;
+                        const socialSecurity = calculateSocialSecurity(annualGross) / 12;
+                        const medicare = calculateMedicare(annualGross) / 12;
+                        const retirement = player.has401k ? grossMonthly * (player.contributionPercent / 100) : 0;
+                        const healthIns = player.healthInsurance ? player.healthInsuranceCost : 0;
+
+                        return (
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span>Gross Pay:</span>
+                              <span className="font-semibold">{formatMoney(grossMonthly)}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>- Federal Tax:</span>
+                              <span className="font-semibold">-{formatMoney(federalTax)}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>- State Tax:</span>
+                              <span className="font-semibold">-{formatMoney(stateTax)}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>- Social Security (6.2%):</span>
+                              <span className="font-semibold">-{formatMoney(socialSecurity)}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>- Medicare (1.45%):</span>
+                              <span className="font-semibold">-{formatMoney(medicare)}</span>
+                            </div>
+                            {retirement > 0 && (
+                              <div className="flex justify-between text-blue-600">
+                                <span>- 401(k) ({player.contributionPercent}%):</span>
+                                <span className="font-semibold">-{formatMoney(retirement)}</span>
+                              </div>
+                            )}
+                            {healthIns > 0 && (
+                              <div className="flex justify-between text-purple-600">
+                                <span>- Health Insurance:</span>
+                                <span className="font-semibold">-{formatMoney(healthIns)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between border-t pt-2 text-lg">
+                              <span className="font-bold">Net Pay (Take-Home):</span>
+                              <span className="font-bold text-green-600">
+                                {formatMoney(grossMonthly - federalTax - stateTax - socialSecurity - medicare - retirement - healthIns)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  <div className="bg-blue-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-3">Tax Tips</h3>
+                    <ul className="space-y-2 text-sm text-slate-700">
+                      <li>💡 401(k) contributions reduce your taxable income</li>
+                      <li>💡 Roth IRA contributions are after-tax (no immediate deduction)</li>
+                      <li>💡 File your taxes on time to avoid penalties</li>
+                      <li>💡 Keep emergency fund for unexpected tax bills</li>
+                      <li>💡 Consider adjusting withholding if you owe or get large refunds</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {currentScreen === 'civic' && (
+                <div>
+                  <h2 className="text-2xl font-bold mb-6">Civic & Social Life</h2>
+                  
+                  {/* Player Stats */}
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-700 text-white rounded-lg p-6">
+                      <h3 className="text-lg mb-2">Civic Engagement</h3>
+                      <p className="text-3xl font-bold">{player.civicEngagement.toFixed(0)}%</p>
+                      <p className="text-sm mt-2 opacity-90">
+                        {player.civicEngagement >= 70 ? 'Very Active' :
+                         player.civicEngagement >= 40 ? 'Moderately Active' : 'Not Very Active'}
+                      </p>
+                    </div>
+                    <div className="bg-gradient-to-br from-purple-500 to-purple-700 text-white rounded-lg p-6">
+                      <h3 className="text-lg mb-2">Social Reputation</h3>
+                      <p className="text-3xl font-bold">{player.socialReputation.toFixed(0)}%</p>
+                      <p className="text-sm mt-2 opacity-90">
+                        {player.socialReputation >= 70 ? 'Well-Respected' :
+                         player.socialReputation >= 40 ? 'Known' : 'Unknown'}
+                      </p>
+                    </div>
+                    <div className="bg-gradient-to-br from-green-500 to-green-700 text-white rounded-lg p-6">
+                      <h3 className="text-lg mb-2">Political Influence</h3>
+                      <p className="text-3xl font-bold">{player.politicalInfluence.toFixed(0)}%</p>
+                      <p className="text-sm mt-2 opacity-90">
+                        Voting History: {player.votingHistory.length} elections
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Political Climate */}
+                  <div className="bg-slate-50 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold mb-4">Political Climate</h3>
+                    
+                    {!player.registeredToVote && (
+                      <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 mb-4">
+                        <p className="text-yellow-800 font-semibold mb-2">⚠️ You're not registered to vote!</p>
+                        <button
+                          onClick={() => {
+                            setPlayer(prev => ({
+                              ...prev,
+                              registeredToVote: true,
+                              civicEngagement: Math.min(100, prev.civicEngagement + 15),
+                            }));
+                            addNotification('✅ You registered to vote!');
+                          }}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                        >
+                          Register to Vote
+                        </button>
+                      </div>
+                    )}
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex justify-between mb-1 text-sm">
+                          <span>Economic Sentiment:</span>
+                          <span>{politicalClimate.economicSentiment.toFixed(0)}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-green-500"
+                            style={{ width: `${politicalClimate.economicSentiment}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between mb-1 text-sm">
+                          <span>Social Tension:</span>
+                          <span>{politicalClimate.socialTension.toFixed(0)}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-red-500"
+                            style={{ width: `${politicalClimate.socialTension}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between mb-1 text-sm">
+                          <span>Trust in Government:</span>
+                          <span>{politicalClimate.trustInGovernment.toFixed(0)}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-500"
+                            style={{ width: `${politicalClimate.trustInGovernment}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Current Election */}
+                  {currentElection && (
+                    <div className="bg-gradient-to-r from-red-100 to-blue-100 rounded-lg p-6 mb-6 border-2 border-slate-300">
+                      <h3 className="text-2xl font-bold mb-4">🗳️ {player.year} Election</h3>
+                      <p className="text-sm text-slate-700 mb-4">
+                        Choose a candidate to vote for, or skip voting. Your choice will influence your community.
+                      </p>
+                      
+                      <div className="grid gap-4 mb-4">
+                        {currentElection.candidates.map(candidate => (
+                          <div key={candidate.id} className="bg-white rounded-lg p-4 border-2 border-slate-200">
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
+                                <h4 className="text-xl font-bold">{candidate.name}</h4>
+                                <p className="text-sm text-slate-600">{candidate.party} Party</p>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm text-slate-500">Public Support</div>
+                                <div className="text-lg font-bold text-blue-600">
+                                  {candidate.publicSupport.toFixed(0)}%
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                              <div>
+                                <strong>Economic:</strong> {candidate.economicStance}
+                              </div>
+                              <div>
+                                <strong>Social:</strong> {candidate.socialStance}
+                              </div>
+                              <div>
+                                <strong>Priority:</strong> {candidate.topPriority}
+                              </div>
+                              <div>
+                                <strong>Competence:</strong> {candidate.competence.toFixed(0)}/100
+                              </div>
+                            </div>
+                            
+                            <button
+                              onClick={() => {
+                                processElectionResults(candidate);
+                                addNotification(`You voted for ${candidate.name}!`);
+                              }}
+                              disabled={currentElection.hasVoted}
+                              className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Vote for {candidate.name}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <button
+                        onClick={() => {
+                          processElectionResults(null);
+                          addNotification('You chose not to vote.');
+                        }}
+                        disabled={currentElection.hasVoted}
+                        className="w-full px-4 py-2 bg-slate-400 text-white rounded-lg font-semibold hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Don't Vote
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Social Connections */}
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold mb-3">Social Connections ({npcs.length})</h3>
+                    {npcs.length === 0 ? (
+                      <p className="text-slate-600 bg-slate-50 rounded-lg p-6">
+                        You haven't met anyone yet. Social events will happen as you live your life!
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4">
+                        {npcs.slice(0, 8).map(npc => {
+                          const bond = socialBonds.find(b => b.npcId === npc.id);
+                          return (
+                            <div key={npc.id} className="bg-slate-50 rounded-lg p-4 border-2 border-slate-200">
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <h4 className="font-bold">{npc.name}</h4>
+                                  <p className="text-xs text-slate-600">{npc.context}</p>
+                                </div>
+                                <div className="text-xs">
+                                  <span className={`px-2 py-1 rounded ${
+                                    npc.personality === 'friendly' ? 'bg-green-100 text-green-800' :
+                                    npc.personality === 'serious' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-slate-200 text-slate-700'
+                                  }`}>
+                                    {npc.personality}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              <div className="space-y-1 text-xs mb-3">
+                                <div className="flex justify-between">
+                                  <span>Opinion:</span>
+                                  <span className="font-semibold">{npc.opinionOfPlayer.toFixed(0)}%</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full ${
+                                      npc.opinionOfPlayer >= 70 ? 'bg-green-500' :
+                                      npc.opinionOfPlayer >= 40 ? 'bg-yellow-500' : 'bg-red-500'
+                                    }`}
+                                    style={{ width: `${npc.opinionOfPlayer}%` }}
+                                  />
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Trust:</span>
+                                  <span className="font-semibold">{npc.trustLevel.toFixed(0)}%</span>
+                                </div>
+                              </div>
+                              
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    interactWithNPC(npc.id, 'help');
+                                    addNotification(`You helped ${npc.name}!`);
+                                  }}
+                                  className="flex-1 px-2 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700"
+                                >
+                                  Help
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    interactWithNPC(npc.id, 'chat');
+                                    addNotification(`You chatted with ${npc.name}`);
+                                  }}
+                                  className="flex-1 px-2 py-1 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-700"
+                                >
+                                  Chat
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {npcs.length > 8 && (
+                      <p className="text-sm text-slate-600 mt-3 text-center">
+                        ... and {npcs.length - 8} more connections
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Election History */}
+                  {electionHistory.length > 0 && (
+                    <div>
+                      <h3 className="text-lg font-semibold mb-3">Past Elections</h3>
+                      <div className="space-y-2">
+                        {electionHistory.slice(-3).reverse().map((election, idx) => (
+                          <div key={idx} className="bg-slate-50 rounded-lg p-4">
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <span className="font-bold">{election.year} Election:</span>
+                                <span className="ml-2">{election.winner.name} ({election.winner.party}) won</span>
+                              </div>
+                              <div className="text-sm">
+                                {election.playerVoted ? (
+                                  <span className="text-green-600 font-semibold">✓ You voted</span>
+                                ) : (
+                                  <span className="text-red-600 font-semibold">✗ Didn't vote</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Info Box */}
+                  <div className="bg-blue-50 rounded-lg p-6 mt-6">
+                    <h3 className="text-lg font-semibold mb-3">About Civic Life</h3>
+                    <ul className="space-y-2 text-sm text-slate-700">
+                      <li>💡 Build social connections through random events and interactions</li>
+                      <li>💡 Your relationships influence how others vote and perceive you</li>
+                      <li>💡 Voting increases civic engagement and social reputation</li>
+                      <li>💡 Elections happen every 2-4 years - candidates are procedurally generated</li>
+                      <li>💡 The political climate shifts based on election outcomes</li>
+                      <li>💡 NPCs have their own opinions and can influence each other</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Notifications */}
+          <div className="fixed top-20 right-6 space-y-2 z-50 max-w-sm">
+            {notifications.map(notif => (
+              <div
+                key={notif.id}
+                className={`notification bg-slate-900 text-white px-6 py-4 rounded-lg shadow-xl ${
+                  notif.type === 'urgent' ? 'urgent border-2 border-red-500' : ''
+                }`}
+              >
+                {notif.message}
+              </div>
+            ))}
+          </div>
+
+          {/* Event Modal */}
+          {showEvent && (
+            <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-2xl w-full p-8">
+                <div className="bg-yellow-100 border-2 border-yellow-400 rounded-lg p-3 mb-4 text-center font-bold">
+                  ⏸️ GAME PAUSED
+                </div>
+                <h2 className="text-3xl font-bold mb-4">{showEvent.title}</h2>
+                <p className="text-lg text-slate-700 mb-6">{showEvent.description}</p>
+                
+                <div className="space-y-3">
+                  {showEvent.choices.map((choice, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleEventChoice(choice)}
+                      className="w-full px-6 py-4 bg-slate-100 hover:bg-slate-200 rounded-lg text-left font-semibold transition-all border-2 border-transparent hover:border-blue-500"
+                    >
+                      {choice.text}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Game Speed Controls */}
+          <div className="fixed bottom-6 right-6 bg-white rounded-lg shadow-xl p-4 border-2 border-slate-200">
+            <div className="text-sm text-slate-600 mb-2">Game Speed</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setGameSpeed(0)}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  gameSpeed === 0 ? 'bg-red-500 text-white' : 'bg-slate-100'
+                }`}
+              >
+                Pause
+              </button>
+              <button
+                onClick={() => setGameSpeed(1)}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  gameSpeed === 1 ? 'bg-blue-500 text-white' : 'bg-slate-100'
+                }`}
+              >
+                1x
+              </button>
+              <button
+                onClick={() => setGameSpeed(2)}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  gameSpeed === 2 ? 'bg-green-500 text-white' : 'bg-slate-100'
+                }`}
+              >
+                2x
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<AdultLifeSimulator />, document.getElementById('root'));
+  </script>
+</body>
+</html>
