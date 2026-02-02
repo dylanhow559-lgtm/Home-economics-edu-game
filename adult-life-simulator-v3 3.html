@@ -1,0 +1,2496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Life Simulator - The Real Adult Experience</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Courier New', monospace;
+      background: #e0e0e0;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%) skew(-5deg); opacity: 0; }
+      to { transform: translateX(0) skew(0deg); opacity: 1; }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.05) rotate(1deg); }
+    }
+    .notification {
+      animation: slideIn 0.3s ease-out;
+      transform: skew(-2deg);
+    }
+    .urgent {
+      animation: pulse 1s infinite;
+    }
+    
+    button {
+      border: 3px solid black !important;
+      box-shadow: 5px 5px 0px rgba(0,0,0,0.8) !important;
+      transform: skew(-1deg) !important;
+      font-family: 'Courier New', monospace !important;
+      font-weight: bold !important;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    button:hover {
+      transform: skew(-1deg) translateY(-2px) !important;
+      box-shadow: 7px 7px 0px rgba(0,0,0,0.9) !important;
+    }
+    
+    input {
+      border: 4px solid black !important;
+      font-family: 'Courier New', monospace !important;
+      transform: skew(-1deg);
+    }
+    
+    .bg-white {
+      background: #f5f5f5 !important;
+      border: 3px solid #333 !important;
+      transform: rotate(-0.5deg);
+    }
+    
+    .rounded-xl, .rounded-lg, .rounded-3xl, .rounded-2xl {
+      border-radius: 2px !important;
+    }
+    
+    .shadow-lg, .shadow-xl {
+      box-shadow: 8px 8px 0px rgba(0,0,0,0.3) !important;
+    }
+    
+    .bg-gradient-to-br, .bg-gradient-to-r {
+      background: repeating-linear-gradient(
+        45deg,
+        #667eea,
+        #667eea 10px,
+        #764ba2 10px,
+        #764ba2 20px
+      ) !important;
+    }
+    
+    .h-2, .h-3 {
+      height: 15px !important;
+      border: 2px solid black;
+    }
+    
+    .grid {
+      gap: 10px !important;
+    }
+    
+    h1, h2, h3 {
+      font-family: 'Courier New', monospace !important;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      text-shadow: 3px 3px 0px rgba(0,0,0,0.2);
+    }
+    
+    .border-2, .border-3 {
+      border-width: 4px !important;
+      border-style: solid !important;
+      border-color: #000 !important;
+    }
+    
+    .stat-fill, .w-full > div {
+      transition: none !important;
+      image-rendering: pixelated;
+    }
+
+    .minigame-button {
+      width: 100px;
+      height: 100px;
+      font-size: 40px;
+      transition: all 0.1s;
+    }
+
+    .minigame-button:active {
+      transform: scale(0.95) skew(-1deg) !important;
+    }
+
+    .stock-up {
+      color: #10b981;
+    }
+
+    .stock-down {
+      color: #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // ==================== FINANCIAL CALCULATIONS ====================
+    
+    const calculateFederalTax = (annualIncome) => {
+      const brackets = [
+        { limit: 11000, rate: 0.10 },
+        { limit: 44725, rate: 0.12 },
+        { limit: 95375, rate: 0.22 },
+        { limit: 182100, rate: 0.24 },
+        { limit: 231250, rate: 0.32 },
+        { limit: 578125, rate: 0.35 },
+        { limit: Infinity, rate: 0.37 }
+      ];
+
+      let tax = 0;
+      let remainingIncome = annualIncome;
+      let previousLimit = 0;
+
+      for (let bracket of brackets) {
+        const taxableInBracket = Math.min(remainingIncome, bracket.limit - previousLimit);
+        if (taxableInBracket <= 0) break;
+        
+        tax += taxableInBracket * bracket.rate;
+        remainingIncome -= taxableInBracket;
+        previousLimit = bracket.limit;
+      }
+
+      return tax;
+    };
+
+    const calculateStateTax = (annualIncome) => {
+      return annualIncome * 0.05;
+    };
+
+    const calculateSocialSecurity = (annualIncome) => {
+      const wageBase = 160200;
+      return Math.min(annualIncome, wageBase) * 0.062;
+    };
+
+    const calculateMedicare = (annualIncome) => {
+      return annualIncome * 0.0145;
+    };
+
+    const calculateMonthlyPayment = (principal, annualRate, months) => {
+      const monthlyRate = annualRate / 12;
+      if (monthlyRate === 0) return principal / months;
+      
+      return principal * (monthlyRate * Math.pow(1 + monthlyRate, months)) / 
+             (Math.pow(1 + monthlyRate, months) - 1);
+    };
+
+    const calculateCreditScore = (onTimePayments, utilization, accountAge, hardInquiries, delinquencies) => {
+      let score = 300;
+      score += (onTimePayments / 100) * 350 * 0.35;
+      score += ((100 - utilization) / 100) * 350 * 0.30;
+      score += Math.min(accountAge / 120, 1) * 350 * 0.15;
+      score -= hardInquiries * 5;
+      score += 35;
+      score -= delinquencies * 80;
+      
+      return Math.max(300, Math.min(850, Math.round(score)));
+    };
+
+    // ==================== GAME DATA ====================
+    
+    const COLLEGE_MAJORS = [
+      { name: 'Computer Science', cost: 120000, duration: 48, salaryBoost: 1.8 },
+      { name: 'Engineering', cost: 110000, duration: 48, salaryBoost: 1.7 },
+      { name: 'Business', cost: 90000, duration: 48, salaryBoost: 1.5 },
+      { name: 'Nursing', cost: 80000, duration: 48, salaryBoost: 1.6 },
+      { name: 'Education', cost: 70000, duration: 48, salaryBoost: 1.3 },
+      { name: 'Liberal Arts', cost: 85000, duration: 48, salaryBoost: 1.2 }
+    ];
+
+    const JOB_LISTINGS = [
+      { title: 'Cashier', hourlyWage: 12, hoursPerWeek: 35, requiresDegree: false, acceptanceRate: 0.8 },
+      { title: 'Waiter/Waitress', hourlyWage: 8, hoursPerWeek: 30, requiresDegree: false, acceptanceRate: 0.75 },
+      { title: 'Retail Associate', hourlyWage: 13, hoursPerWeek: 40, requiresDegree: false, acceptanceRate: 0.7 },
+      { title: 'Delivery Driver', hourlyWage: 16, hoursPerWeek: 40, requiresDegree: false, acceptanceRate: 0.65 },
+      { title: 'Warehouse Worker', hourlyWage: 17, hoursPerWeek: 40, requiresDegree: false, acceptanceRate: 0.7 },
+      { title: 'Junior Software Developer', hourlyWage: 35, hoursPerWeek: 40, requiresDegree: true, acceptanceRate: 0.4, major: 'Computer Science' },
+      { title: 'Mechanical Engineer', hourlyWage: 38, hoursPerWeek: 40, requiresDegree: true, acceptanceRate: 0.35, major: 'Engineering' },
+      { title: 'Marketing Coordinator', hourlyWage: 25, hoursPerWeek: 40, requiresDegree: true, acceptanceRate: 0.5, major: 'Business' },
+      { title: 'Registered Nurse', hourlyWage: 36, hoursPerWeek: 36, requiresDegree: true, acceptanceRate: 0.6, major: 'Nursing' },
+      { title: 'Teacher', hourlyWage: 28, hoursPerWeek: 40, requiresDegree: true, acceptanceRate: 0.55, major: 'Education' },
+      { title: 'Financial Analyst', hourlyWage: 32, hoursPerWeek: 45, requiresDegree: true, acceptanceRate: 0.45, major: 'Business' },
+      { title: 'Data Analyst', hourlyWage: 33, hoursPerWeek: 40, requiresDegree: true, acceptanceRate: 0.4, major: 'Computer Science' },
+    ];
+
+    const MILITARY_BRANCHES = [
+      { name: 'Army', salary: 2500, duration: 48, signing_bonus: 5000, benefits: 'GI Bill + Healthcare' },
+      { name: 'Navy', salary: 2600, duration: 48, signing_bonus: 5500, benefits: 'GI Bill + Healthcare' },
+      { name: 'Air Force', salary: 2700, duration: 48, signing_bonus: 6000, benefits: 'GI Bill + Healthcare' },
+      { name: 'Marines', salary: 2400, duration: 48, signing_bonus: 4500, benefits: 'GI Bill + Healthcare' },
+    ];
+
+    const VACATIONS = [
+      { name: 'Camping Trip', cost: 300, duration: 1, stress: -20, happiness: 15, health: 10 },
+      { name: 'Beach Vacation', cost: 1200, duration: 1, stress: -35, happiness: 30, health: 15 },
+      { name: 'European Tour', cost: 4500, duration: 2, stress: -50, happiness: 50, health: 20 },
+      { name: 'Cruise', cost: 2500, duration: 2, stress: -40, happiness: 40, health: 25 },
+      { name: 'Spa Weekend', cost: 800, duration: 1, stress: -30, happiness: 25, health: 30 },
+      { name: 'Mountain Retreat', cost: 600, duration: 1, stress: -25, happiness: 20, health: 15 },
+    ];
+
+    const CARS = [
+      { name: '2010 Honda Civic (Used)', price: 8000, condition: 'used', maintenanceCost: 100 },
+      { name: '2015 Toyota Corolla (Used)', price: 14000, condition: 'used', maintenanceCost: 80 },
+      { name: '2018 Ford Focus (Used)', price: 16000, condition: 'used', maintenanceCost: 90 },
+      { name: '2024 Honda Accord (New)', price: 32000, condition: 'new', maintenanceCost: 50 },
+      { name: '2024 Toyota Camry (New)', price: 35000, condition: 'new', maintenanceCost: 45 },
+      { name: '2024 Tesla Model 3 (New)', price: 45000, condition: 'new', maintenanceCost: 60 },
+      { name: '2024 BMW 3 Series (New)', price: 55000, condition: 'new', maintenanceCost: 150 },
+    ];
+
+    const HOUSES = [
+      { name: 'Studio Apartment (Rent)', price: 900, type: 'rent', size: 'studio' },
+      { name: '1 Bedroom Apartment (Rent)', price: 1200, type: 'rent', size: '1br' },
+      { name: '2 Bedroom Apartment (Rent)', price: 1600, type: 'rent', size: '2br' },
+      { name: 'Small House (Used)', price: 180000, type: 'buy', size: 'small', maintenanceCost: 200 },
+      { name: 'Medium House (Used)', price: 280000, type: 'buy', size: 'medium', maintenanceCost: 300 },
+      { name: 'Large House (Used)', price: 450000, type: 'buy', size: 'large', maintenanceCost: 500 },
+      { name: 'New Construction Home', price: 380000, type: 'buy', size: 'medium', maintenanceCost: 150 },
+      { name: 'Luxury Home (New)', price: 750000, type: 'buy', size: 'luxury', maintenanceCost: 800 },
+    ];
+
+    const FELONIES = [
+      { name: 'Tax Evasion', successRate: 0.4, fine: 50000, jailTime: 24, reward: 15000 },
+      { name: 'Identity Theft', successRate: 0.3, fine: 30000, jailTime: 18, reward: 10000 },
+      { name: 'Embezzlement', successRate: 0.25, fine: 100000, jailTime: 36, reward: 35000 },
+      { name: 'Wire Fraud', successRate: 0.35, fine: 40000, jailTime: 20, reward: 12000 },
+    ];
+
+    const ROBBERIES = [
+      { name: 'Convenience Store', successRate: 0.5, fine: 5000, jailTime: 6, reward: 2000 },
+      { name: 'Gas Station', successRate: 0.45, fine: 8000, jailTime: 8, reward: 3500 },
+      { name: 'Bank', successRate: 0.2, fine: 100000, jailTime: 60, reward: 50000 },
+      { name: 'Jewelry Store', successRate: 0.25, fine: 75000, jailTime: 48, reward: 40000 },
+      { name: 'Armored Truck', successRate: 0.15, fine: 150000, jailTime: 72, reward: 80000 },
+    ];
+
+    const CLASSES = {
+      'Tax Preparation': {
+        cost: 500,
+        duration: 3,
+        benefit: 'tax_knowledge',
+        description: 'Learn to file your own taxes and understand deductions',
+        gameType: 'memory'
+      },
+      'Cooking Basics': {
+        cost: 300,
+        duration: 2,
+        benefit: 'cooking_skill',
+        description: 'Learn to make nutritious meals from basic ingredients',
+        gameType: 'sequence'
+      },
+      'Personal Finance': {
+        cost: 400,
+        duration: 2,
+        benefit: 'finance_knowledge',
+        description: 'Master budgeting, investing, and money management',
+        gameType: 'math'
+      },
+      'Home Maintenance': {
+        cost: 350,
+        duration: 2,
+        benefit: 'handyman_skill',
+        description: 'Basic repairs and maintenance to save money',
+        gameType: 'reaction'
+      }
+    };
+
+    const INITIAL_STOCKS = [
+      { ticker: 'TECH', name: 'Tech Corp', price: 150, volatility: 0.15 },
+      { ticker: 'BANK', name: 'Banking Inc', price: 80, volatility: 0.08 },
+      { ticker: 'OIL', name: 'Oil Giants', price: 120, volatility: 0.12 },
+      { ticker: 'RETAIL', name: 'Retail Chain', price: 45, volatility: 0.10 },
+      { ticker: 'PHARMA', name: 'Pharma Plus', price: 200, volatility: 0.20 },
+      { ticker: 'AUTO', name: 'Auto Motors', price: 95, volatility: 0.14 },
+    ];
+
+    // ==================== MAIN COMPONENT ====================
+    
+    const AdultLifeSimulator = () => {
+      const [gameStarted, setGameStarted] = useState(false);
+      const [playerName, setPlayerName] = useState('');
+      const [currentScreen, setCurrentScreen] = useState('overview');
+      const [gameSpeed, setGameSpeed] = useState(1);
+      const [notifications, setNotifications] = useState([]);
+      const [showEvent, setShowEvent] = useState(null);
+      const [miniGame, setMiniGame] = useState(null);
+      const [stocks, setStocks] = useState(INITIAL_STOCKS);
+      
+      const [player, setPlayer] = useState({
+        name: '',
+        age: 18,
+        month: 0,
+        year: 1,
+        money: 5000,
+        
+        // Presidency
+        isPresident: false,
+        canRunForPresident: false,
+        presidentialTerms: 0,
+        
+        // Education
+        inCollege: false,
+        collegeMajor: null,
+        collegeProgress: 0,
+        hasCollegeDegree: false,
+        studentLoanDebt: 0,
+        
+        // Military
+        inMilitary: false,
+        militaryBranch: null,
+        militaryProgress: 0,
+        hasMilitaryService: false,
+        hasGIBill: false,
+        
+        // Employment
+        job: null,
+        hourlyWage: 0,
+        hoursPerWeek: 0,
+        yearToDateIncome: 0,
+        
+        // Possessions
+        car: null,
+        house: null,
+        housePayment: 0,
+        
+        // Stocks
+        portfolio: {},
+        
+        // Skills & Knowledge
+        taxKnowledge: false,
+        cookingSkill: 0,
+        financeKnowledge: false,
+        handymanSkill: false,
+        
+        // Crime
+        hasFelony: false,
+        dodgingIRS: false,
+        irsDebtAccumulated: 0,
+        monthsSinceTaxEvasion: 0,
+        inJail: false,
+        jailMonthsRemaining: 0,
+        
+        // Classes
+        currentClass: null,
+        classProgress: 0,
+        
+        // Vacation
+        onVacation: false,
+        vacationMonthsRemaining: 0,
+        
+        // Finances
+        creditScore: 650,
+        onTimePayments: 100,
+        creditUtilization: 0,
+        accountAge: 0,
+        hardInquiries: 0,
+        delinquencies: 0,
+        
+        taxesPaid: 0,
+        has401k: false,
+        contributionPercent: 0,
+        retirement401k: 0,
+        employerMatch: 0,
+        
+        healthInsurance: false,
+        healthInsuranceCost: 0,
+        
+        // Stats
+        health: 100,
+        happiness: 75,
+        stress: 20,
+        hunger: 30,
+        energy: 80,
+        
+        // Expenses
+        rentCost: 0,
+        foodCost: 200,
+        utilitiesCost: 100,
+        transportCost: 150,
+      });
+
+      // Check for millionaire status
+      useEffect(() => {
+        if (player.money >= 1000000 && !player.canRunForPresident && !player.isPresident) {
+          setPlayer(prev => ({ ...prev, canRunForPresident: true }));
+          addNotification('🎉 YOU\'RE A MILLIONAIRE! You can now run for PRESIDENT!', 'normal');
+        }
+      }, [player.money]);
+
+      // Notification system
+      const addNotification = (message, type = 'normal') => {
+        const id = Date.now();
+        setNotifications(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setNotifications(prev => prev.filter(n => n.id !== id));
+        }, 5000);
+      };
+
+      // Format money
+      const formatMoney = (amount) => {
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(amount);
+      };
+
+      // Start game
+      const startGame = () => {
+        if (playerName.trim()) {
+          setPlayer(prev => ({ ...prev, name: playerName }));
+          setGameStarted(true);
+        }
+      };
+
+      // Run for president
+      const runForPresident = () => {
+        if (player.canRunForPresident && player.money >= 500000) {
+          setPlayer(prev => ({
+            ...prev,
+            isPresident: true,
+            canRunForPresident: false,
+            money: prev.money - 500000,
+            presidentialTerms: 1,
+            job: 'President of the United States',
+            hourlyWage: 400000 / 2080, // Presidential salary
+            hoursPerWeek: 60
+          }));
+          addNotification('🎊 CONGRATULATIONS! You are now the PRESIDENT!', 'normal');
+        } else {
+          addNotification('Need $500,000 for campaign costs!', 'urgent');
+        }
+      };
+
+      // Presidential actions
+      const presidentialAction = (action) => {
+        switch(action) {
+          case 'tax_cut':
+            addNotification('Tax cuts implemented! Popularity +10', 'normal');
+            setPlayer(prev => ({ ...prev, happiness: Math.min(100, prev.happiness + 10) }));
+            break;
+          case 'declare_war':
+            const warCost = 100000;
+            setPlayer(prev => ({ ...prev, money: prev.money - warCost }));
+            addNotification(`War declared! Cost: ${formatMoney(warCost)}`, 'urgent');
+            break;
+          case 'pardon':
+            if (player.hasFelony) {
+              setPlayer(prev => ({ ...prev, hasFelony: false }));
+              addNotification('You pardoned yourself! No more felony record.', 'normal');
+            }
+            break;
+          case 'infrastructure':
+            setPlayer(prev => ({ ...prev, money: prev.money - 250000, happiness: Math.min(100, prev.happiness + 15) }));
+            addNotification('Infrastructure bill passed! Cost $250k', 'normal');
+            break;
+        }
+      };
+
+      // Stock market functions
+      const buyStock = (ticker, shares) => {
+        const stock = stocks.find(s => s.ticker === ticker);
+        const cost = stock.price * shares;
+        
+        if (player.money >= cost) {
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money - cost,
+            portfolio: {
+              ...prev.portfolio,
+              [ticker]: (prev.portfolio[ticker] || 0) + shares
+            }
+          }));
+          addNotification(`Bought ${shares} shares of ${ticker} for ${formatMoney(cost)}`, 'normal');
+        } else {
+          addNotification('Not enough money!', 'urgent');
+        }
+      };
+
+      const sellStock = (ticker, shares) => {
+        const stock = stocks.find(s => s.ticker === ticker);
+        const owned = player.portfolio[ticker] || 0;
+        
+        if (owned >= shares) {
+          const profit = stock.price * shares;
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money + profit,
+            portfolio: {
+              ...prev.portfolio,
+              [ticker]: prev.portfolio[ticker] - shares
+            }
+          }));
+          addNotification(`Sold ${shares} shares of ${ticker} for ${formatMoney(profit)}`, 'normal');
+        } else {
+          addNotification('Not enough shares!', 'urgent');
+        }
+      };
+
+      // Robbery
+      const commitRobbery = (robbery) => {
+        if (Math.random() < robbery.successRate) {
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money + robbery.reward,
+            hasFelony: true
+          }));
+          addNotification(`Robbery successful! Gained ${formatMoney(robbery.reward)}`, 'normal');
+        } else {
+          setPlayer(prev => ({
+            ...prev,
+            money: Math.max(0, prev.money - robbery.fine),
+            hasFelony: true,
+            inJail: true,
+            jailMonthsRemaining: robbery.jailTime
+          }));
+          addNotification(`CAUGHT! Fined ${formatMoney(robbery.fine)} and ${robbery.jailTime} months jail!`, 'urgent');
+        }
+      };
+
+      // Join Military
+      const joinMilitary = (branch) => {
+        const branchData = MILITARY_BRANCHES.find(b => b.name === branch);
+        if (branchData && player.health >= 70) {
+          setPlayer(prev => ({
+            ...prev,
+            inMilitary: true,
+            militaryBranch: branch,
+            militaryProgress: 0,
+            money: prev.money + branchData.signing_bonus,
+            job: `${branch} Service Member`,
+            hourlyWage: branchData.salary / 173,
+            hoursPerWeek: 40,
+            healthInsurance: true,
+            healthInsuranceCost: 0,
+            rentCost: 0,
+            foodCost: 0
+          }));
+          addNotification(`Joined the ${branch}! Received ${formatMoney(branchData.signing_bonus)} signing bonus!`, 'normal');
+        } else if (player.health < 70) {
+          addNotification('Health too low to join military! Need 70+ health.', 'urgent');
+        }
+      };
+
+      // Go on vacation
+      const takeVacation = (vacation) => {
+        if (player.money >= vacation.cost && !player.onVacation) {
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money - vacation.cost,
+            onVacation: true,
+            vacationMonthsRemaining: vacation.duration,
+            stress: Math.max(0, prev.stress + vacation.stress),
+            happiness: Math.min(100, prev.happiness + vacation.happiness),
+            health: Math.min(100, prev.health + vacation.health)
+          }));
+          addNotification(`Going on ${vacation.name}! Enjoy your trip!`, 'normal');
+        } else if (player.onVacation) {
+          addNotification('Already on vacation!', 'urgent');
+        } else {
+          addNotification('Not enough money!', 'urgent');
+        }
+      };
+
+      // Enroll in college
+      const enrollInCollege = (major) => {
+        // Check if felon
+        if (player.hasFelony) {
+          addNotification('Cannot enroll in college with a felony record!', 'urgent');
+          return;
+        }
+        
+        const majorData = COLLEGE_MAJORS.find(m => m.name === major);
+        let cost = majorData.cost;
+        
+        if (player.hasGIBill) {
+          cost = 0;
+          addNotification('GI Bill covers your tuition!', 'normal');
+        }
+        
+        const downPayment = player.hasGIBill ? 0 : 5000;
+        
+        if (player.money >= downPayment) {
+          setPlayer(prev => ({
+            ...prev,
+            inCollege: true,
+            collegeMajor: major,
+            collegeProgress: 0,
+            money: prev.money - downPayment,
+            studentLoanDebt: prev.studentLoanDebt + cost - downPayment
+          }));
+          if (!player.hasGIBill) {
+            addNotification(`Enrolled in ${major}! Took out ${formatMoney(cost - downPayment)} in student loans.`, 'normal');
+          } else {
+            addNotification(`Enrolled in ${major}!`, 'normal');
+          }
+        } else {
+          addNotification('Not enough money for down payment!', 'urgent');
+        }
+      };
+
+      // Apply for job
+      const applyForJob = (job) => {
+        if (job.requiresDegree && !player.hasCollegeDegree) {
+          addNotification('This job requires a college degree!', 'urgent');
+          return;
+        }
+
+        let acceptance = job.acceptanceRate;
+        
+        if (player.hasCollegeDegree && job.major === player.collegeMajor) {
+          acceptance += 0.2;
+        }
+        
+        if (player.hasMilitaryService) {
+          acceptance += 0.15;
+        }
+        
+        if (player.hasFelony) {
+          acceptance -= 0.3;
+        }
+
+        if (Math.random() < acceptance) {
+          let wage = job.hourlyWage;
+          
+          if (player.hasCollegeDegree) {
+            const major = COLLEGE_MAJORS.find(m => m.name === player.collegeMajor);
+            if (major) {
+              wage *= major.salaryBoost;
+            }
+          }
+
+          setPlayer(prev => ({
+            ...prev,
+            job: job.title,
+            hourlyWage: wage,
+            hoursPerWeek: job.hoursPerWeek
+          }));
+          addNotification(`Hired as ${job.title} at ${formatMoney(wage)}/hour!`, 'normal');
+        } else {
+          addNotification('Application rejected. Try again later!', 'urgent');
+        }
+      };
+
+      // Buy car
+      const buyCar = (car) => {
+        if (player.money >= car.price) {
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money - car.price,
+            car: car.name,
+            transportCost: car.maintenanceCost
+          }));
+          addNotification(`Purchased ${car.name}!`, 'normal');
+        } else {
+          addNotification('Not enough money!', 'urgent');
+        }
+      };
+
+      // Buy/Rent house
+      const buyHouse = (house) => {
+        if (house.type === 'rent') {
+          setPlayer(prev => ({
+            ...prev,
+            house: house.name,
+            rentCost: house.price,
+            housePayment: house.price
+          }));
+          addNotification(`Rented ${house.name} for ${formatMoney(house.price)}/month`, 'normal');
+        } else {
+          const downPayment = house.price * 0.2;
+          if (player.money >= downPayment) {
+            const loanAmount = house.price - downPayment;
+            const monthlyPayment = calculateMonthlyPayment(loanAmount, 0.065, 360);
+            
+            setPlayer(prev => ({
+              ...prev,
+              money: prev.money - downPayment,
+              house: house.name,
+              housePayment: monthlyPayment + (house.maintenanceCost || 0),
+              rentCost: 0
+            }));
+            addNotification(`Purchased ${house.name}! Monthly payment: ${formatMoney(monthlyPayment)}`, 'normal');
+          } else {
+            addNotification(`Need ${formatMoney(downPayment)} for down payment!`, 'urgent');
+          }
+        }
+      };
+
+      // Commit felony
+      const commitFelony = (felony) => {
+        if (Math.random() < felony.successRate) {
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money + felony.reward,
+            hasFelony: true
+          }));
+          addNotification(`Successfully committed ${felony.name}! Gained ${formatMoney(felony.reward)}`, 'normal');
+        } else {
+          setPlayer(prev => ({
+            ...prev,
+            money: Math.max(0, prev.money - felony.fine),
+            hasFelony: true,
+            inJail: true,
+            jailMonthsRemaining: felony.jailTime
+          }));
+          addNotification(`CAUGHT! Fined ${formatMoney(felony.fine)} and sentenced to ${felony.jailTime} months in jail!`, 'urgent');
+        }
+      };
+
+      // Dodge IRS
+      const dodgeIRS = () => {
+        if (!player.dodgingIRS) {
+          setPlayer(prev => ({
+            ...prev,
+            dodgingIRS: true,
+            monthsSinceTaxEvasion: 0
+          }));
+          addNotification('Now dodging the IRS... hope you don\'t get caught!', 'urgent');
+        }
+      };
+
+      // Take a class - starts minigame
+      const takeClass = (className) => {
+        const classData = CLASSES[className];
+        if (player.money >= classData.cost && !player.currentClass) {
+          setPlayer(prev => ({
+            ...prev,
+            money: prev.money - classData.cost,
+            currentClass: className,
+            classProgress: 0
+          }));
+          startMiniGame(className, classData.gameType);
+        } else if (player.currentClass) {
+          addNotification('Already taking a class!', 'urgent');
+        } else {
+          addNotification('Not enough money!', 'urgent');
+        }
+      };
+
+      // Mini-game system
+      const startMiniGame = (className, gameType) => {
+        setMiniGame({
+          className,
+          gameType,
+          active: true
+        });
+      };
+
+      const completeMiniGame = (passed) => {
+        if (passed) {
+          addNotification(`Passed ${player.currentClass}!`, 'normal');
+        } else {
+          addNotification(`Failed ${player.currentClass}! Class cancelled.`, 'urgent');
+          setPlayer(prev => ({
+            ...prev,
+            currentClass: null,
+            classProgress: 0
+          }));
+        }
+        setMiniGame(null);
+      };
+
+      // Game loop
+      useEffect(() => {
+        if (!gameStarted || gameSpeed === 0) return;
+
+        const interval = setInterval(() => {
+          // Update stock prices
+          setStocks(prevStocks => 
+            prevStocks.map(stock => {
+              const change = (Math.random() - 0.5) * stock.volatility * stock.price;
+              return {
+                ...stock,
+                price: Math.max(1, stock.price + change)
+              };
+            })
+          );
+
+          setPlayer(prev => {
+            let newState = { ...prev };
+
+            if (newState.onVacation) {
+              newState.vacationMonthsRemaining -= 1;
+              if (newState.vacationMonthsRemaining <= 0) {
+                newState.onVacation = false;
+                addNotification('Vacation ended! Back to reality.', 'normal');
+              }
+              newState.month += 1;
+              if (newState.month >= 12) {
+                newState.month = 0;
+                newState.year += 1;
+                newState.age += 1;
+              }
+              return newState;
+            }
+
+            if (newState.inJail) {
+              newState.jailMonthsRemaining -= 1;
+              if (newState.jailMonthsRemaining <= 0) {
+                newState.inJail = false;
+                addNotification('Released from jail!', 'normal');
+              }
+              newState.month += 1;
+              if (newState.month >= 12) {
+                newState.month = 0;
+                newState.year += 1;
+                newState.age += 1;
+              }
+              return newState;
+            }
+
+            newState.month += 1;
+            if (newState.month >= 12) {
+              newState.month = 0;
+              newState.year += 1;
+              newState.age += 1;
+              
+              if (!newState.dodgingIRS) {
+                const totalTax = calculateFederalTax(newState.yearToDateIncome) + 
+                               calculateStateTax(newState.yearToDateIncome);
+                const refund = newState.taxesPaid - totalTax;
+                
+                if (refund > 0) {
+                  newState.money += refund;
+                  addNotification(`Tax refund: ${formatMoney(refund)}!`, 'normal');
+                } else if (refund < 0) {
+                  newState.money -= Math.abs(refund);
+                  addNotification(`Owe taxes: ${formatMoney(Math.abs(refund))}`, 'urgent');
+                }
+                
+                newState.yearToDateIncome = 0;
+                newState.taxesPaid = 0;
+              }
+            }
+
+            if (newState.inMilitary) {
+              newState.militaryProgress += 1;
+              const branchData = MILITARY_BRANCHES.find(b => b.name === newState.militaryBranch);
+              if (newState.militaryProgress >= branchData.duration) {
+                newState.inMilitary = false;
+                newState.hasMilitaryService = true;
+                newState.hasGIBill = true;
+                newState.job = null;
+                newState.hourlyWage = 0;
+                newState.hoursPerWeek = 0;
+                newState.rentCost = 0;
+                newState.foodCost = 200;
+                addNotification(`Honorably discharged from ${newState.militaryBranch}! You now have GI Bill benefits!`, 'normal');
+              }
+            }
+
+            if (newState.inCollege) {
+              newState.collegeProgress += 1;
+              const majorData = COLLEGE_MAJORS.find(m => m.name === newState.collegeMajor);
+              if (newState.collegeProgress >= majorData.duration) {
+                newState.inCollege = false;
+                newState.hasCollegeDegree = true;
+                addNotification(`Graduated with ${newState.collegeMajor} degree!`, 'normal');
+              }
+            }
+
+            if (newState.currentClass) {
+              newState.classProgress += 1;
+              const classData = CLASSES[newState.currentClass];
+              if (newState.classProgress >= classData.duration) {
+                if (classData.benefit === 'tax_knowledge') {
+                  newState.taxKnowledge = true;
+                } else if (classData.benefit === 'cooking_skill') {
+                  newState.cookingSkill = 3;
+                  newState.foodCost = Math.max(100, newState.foodCost - 50);
+                } else if (classData.benefit === 'finance_knowledge') {
+                  newState.financeKnowledge = true;
+                } else if (classData.benefit === 'handyman_skill') {
+                  newState.handymanSkill = true;
+                  if (newState.housePayment > 0) {
+                    newState.housePayment = Math.max(0, newState.housePayment - 50);
+                  }
+                }
+                
+                addNotification(`Completed ${newState.currentClass}!`, 'normal');
+                newState.currentClass = null;
+                newState.classProgress = 0;
+              }
+            }
+
+            if (newState.job) {
+              const grossMonthly = newState.hourlyWage * newState.hoursPerWeek * 4.33;
+              const annualGross = grossMonthly * 12;
+              
+              let monthlyIncome = grossMonthly;
+              
+              if (!newState.dodgingIRS) {
+                const federalTax = calculateFederalTax(annualGross) / 12;
+                const stateTax = calculateStateTax(annualGross) / 12;
+                const socialSecurity = calculateSocialSecurity(annualGross) / 12;
+                const medicare = calculateMedicare(annualGross) / 12;
+                
+                const totalTax = federalTax + stateTax + socialSecurity + medicare;
+                monthlyIncome -= totalTax;
+                newState.taxesPaid += totalTax;
+              } else {
+                const federalTax = calculateFederalTax(annualGross) / 12;
+                const stateTax = calculateStateTax(annualGross) / 12;
+                newState.irsDebtAccumulated += (federalTax + stateTax) * 1.5;
+                newState.monthsSinceTaxEvasion += 1;
+                
+                const catchChance = Math.min(0.05 + (newState.monthsSinceTaxEvasion * 0.01), 0.5);
+                if (Math.random() < catchChance) {
+                  addNotification(`IRS CAUGHT YOU! Debt: ${formatMoney(newState.irsDebtAccumulated)}`, 'urgent');
+                  newState.money -= newState.irsDebtAccumulated;
+                  newState.dodgingIRS = false;
+                  newState.irsDebtAccumulated = 0;
+                  newState.hasFelony = true;
+                  newState.inJail = true;
+                  newState.jailMonthsRemaining = 12;
+                }
+              }
+              
+              if (newState.has401k) {
+                const contribution = grossMonthly * (newState.contributionPercent / 100);
+                monthlyIncome -= contribution;
+                newState.retirement401k += contribution;
+                const match = contribution * (newState.employerMatch / 100);
+                newState.retirement401k += match;
+              }
+              
+              if (newState.healthInsurance) {
+                monthlyIncome -= newState.healthInsuranceCost;
+              }
+              
+              newState.money += monthlyIncome;
+              newState.yearToDateIncome += grossMonthly;
+            }
+
+            const totalExpenses = newState.rentCost + newState.housePayment + 
+                                newState.foodCost + newState.utilitiesCost + 
+                                newState.transportCost;
+            
+            newState.money -= totalExpenses;
+
+            if (newState.studentLoanDebt > 0) {
+              const payment = calculateMonthlyPayment(newState.studentLoanDebt, 0.045, 120);
+              newState.money -= payment;
+              newState.studentLoanDebt -= (payment * 0.7);
+            }
+
+            newState.stress = Math.min(100, newState.stress + 2);
+            
+            // Stress modifiers
+            if (newState.money > 50000) {
+              newState.stress = Math.max(0, newState.stress - 1);
+            }
+            if (newState.isPresident) {
+              newState.stress = Math.min(100, newState.stress + 2); // Being president is stressful!
+            }
+            if (!newState.job && !newState.inMilitary && !newState.inCollege) {
+              newState.stress = Math.min(100, newState.stress + 1); // Unemployment stress
+            }
+            
+            newState.hunger = Math.min(100, newState.hunger + 5);
+            newState.energy = Math.max(0, newState.energy - 3);
+            
+            if (newState.cookingSkill > 0) {
+              newState.health = Math.min(100, newState.health + 1);
+            } else {
+              newState.health = Math.max(0, newState.health - 0.5);
+            }
+
+            if (newState.money < 0) {
+              newState.happiness = Math.max(0, newState.happiness - 5);
+              newState.stress = Math.min(100, newState.stress + 5);
+            } else if (newState.money > 10000) {
+              newState.happiness = Math.min(100, newState.happiness + 1);
+              newState.stress = Math.max(0, newState.stress - 1);
+            }
+
+            newState.accountAge += 1;
+            if (newState.money >= 0) {
+              newState.onTimePayments = Math.min(100, newState.onTimePayments + 0.5);
+            } else {
+              newState.onTimePayments = Math.max(0, newState.onTimePayments - 5);
+              newState.delinquencies += 1;
+            }
+            
+            newState.creditScore = calculateCreditScore(
+              newState.onTimePayments,
+              newState.creditUtilization,
+              newState.accountAge,
+              newState.hardInquiries,
+              newState.delinquencies
+            );
+
+            return newState;
+          });
+        }, 1000 / gameSpeed);
+
+        return () => clearInterval(interval);
+      }, [gameStarted, gameSpeed]);
+
+      // ==================== MINI-GAMES (SLOWER) ====================
+
+      const MemoryGame = ({ onComplete }) => {
+        const [sequence, setSequence] = useState([]);
+        const [playerSequence, setPlayerSequence] = useState([]);
+        const [showing, setShowing] = useState(false);
+        const [round, setRound] = useState(1);
+        const [gameOver, setGameOver] = useState(false);
+
+        const colors = ['red', 'blue', 'green', 'yellow'];
+
+        useEffect(() => {
+          startRound();
+        }, []);
+
+        const startRound = () => {
+          const newSequence = [...sequence];
+          newSequence.push(colors[Math.floor(Math.random() * colors.length)]);
+          setSequence(newSequence);
+          setPlayerSequence([]);
+          showSequence(newSequence);
+        };
+
+        const showSequence = async (seq) => {
+          setShowing(true);
+          for (let i = 0; i < seq.length; i++) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const button = document.getElementById(`memory-${seq[i]}`);
+            if (button) {
+              button.style.opacity = '1';
+              button.style.transform = 'scale(1.1)';
+              await new Promise(resolve => setTimeout(resolve, 800));
+              button.style.opacity = '0.5';
+              button.style.transform = 'scale(1)';
+            }
+          }
+          setShowing(false);
+        };
+
+        const handleColorClick = (color) => {
+          if (showing || gameOver) return;
+
+          const newPlayerSeq = [...playerSequence, color];
+          setPlayerSequence(newPlayerSeq);
+
+          if (color !== sequence[newPlayerSeq.length - 1]) {
+            setGameOver(true);
+            onComplete(false);
+            return;
+          }
+
+          if (newPlayerSeq.length === sequence.length) {
+            if (round >= 5) {
+              onComplete(true);
+            } else {
+              setRound(round + 1);
+              setTimeout(() => startRound(), 1500);
+            }
+          }
+        };
+
+        return (
+          <div className="text-center">
+            <h3 className="text-2xl font-bold mb-4">MEMORY GAME - Round {round}/5</h3>
+            <p className="mb-6 text-lg">Watch the sequence carefully and repeat it!</p>
+            {showing && <p className="text-xl text-blue-600 mb-4">WATCH...</p>}
+            {!showing && !gameOver && <p className="text-xl text-green-600 mb-4">YOUR TURN!</p>}
+            <div className="grid grid-cols-2 gap-6 max-w-lg mx-auto">
+              {colors.map(color => (
+                <button
+                  key={color}
+                  id={`memory-${color}`}
+                  onClick={() => handleColorClick(color)}
+                  disabled={showing || gameOver}
+                  className="minigame-button transition-all"
+                  style={{
+                    backgroundColor: color,
+                    opacity: 0.5,
+                    transform: 'scale(1)'
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      const SequenceGame = ({ onComplete }) => {
+        const [sequence, setSequence] = useState([]);
+        const [playerSeq, setPlayerSeq] = useState([]);
+        const [gameOver, setGameOver] = useState(false);
+
+        const ingredients = ['🥚', '🧈', '🥛', '🧅', '🧄', '🍳', '🥓', '🧀'];
+
+        useEffect(() => {
+          const shuffled = [...ingredients].sort(() => Math.random() - 0.5);
+          setSequence(shuffled.slice(0, 5));
+        }, []);
+
+        const handleClick = (ingredient) => {
+          if (gameOver) return;
+
+          const newSeq = [...playerSeq, ingredient];
+          setPlayerSeq(newSeq);
+
+          if (ingredient !== sequence[newSeq.length - 1]) {
+            setGameOver(true);
+            setTimeout(() => onComplete(false), 500);
+            return;
+          }
+
+          if (newSeq.length === sequence.length) {
+            setTimeout(() => onComplete(true), 500);
+          }
+        };
+
+        return (
+          <div className="text-center">
+            <h3 className="text-2xl font-bold mb-4">COOKING SEQUENCE</h3>
+            <p className="mb-4 text-lg">Click the ingredients in the correct order:</p>
+            <div className="text-5xl mb-6 space-x-3 p-4 bg-blue-50 rounded-lg">
+              {sequence.map((item, idx) => (
+                <span key={idx}>{item}</span>
+              ))}
+            </div>
+            <p className="mb-6 text-xl">Your sequence: {playerSeq.join(' ') || '(none yet)'}</p>
+            <div className="grid grid-cols-4 gap-4 max-w-2xl mx-auto">
+              {ingredients.map((ingredient, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleClick(ingredient)}
+                  disabled={gameOver}
+                  className="minigame-button text-4xl hover:scale-110 transition-all"
+                >
+                  {ingredient}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      const MathGame = ({ onComplete }) => {
+        const [problems, setProblems] = useState([]);
+        const [currentProblem, setCurrentProblem] = useState(0);
+        const [answer, setAnswer] = useState('');
+        const [correct, setCorrect] = useState(0);
+
+        useEffect(() => {
+          const newProblems = [];
+          for (let i = 0; i < 5; i++) {
+            const a = Math.floor(Math.random() * 50) + 10;
+            const b = Math.floor(Math.random() * 50) + 10;
+            const op = ['+', '-', '*'][Math.floor(Math.random() * 3)];
+            let result;
+            if (op === '+') result = a + b;
+            else if (op === '-') result = a - b;
+            else result = a * b;
+            newProblems.push({ a, b, op, result });
+          }
+          setProblems(newProblems);
+        }, []);
+
+        const handleSubmit = () => {
+          const isCorrect = parseInt(answer) === problems[currentProblem].result;
+          const newCorrect = correct + (isCorrect ? 1 : 0);
+          setCorrect(newCorrect);
+          
+          if (currentProblem + 1 >= problems.length) {
+            setTimeout(() => onComplete(newCorrect >= 3), 500);
+          } else {
+            setCurrentProblem(currentProblem + 1);
+            setAnswer('');
+          }
+        };
+
+        if (problems.length === 0) return <div>Loading...</div>;
+
+        return (
+          <div className="text-center">
+            <h3 className="text-2xl font-bold mb-4">FINANCE MATH - Problem {currentProblem + 1}/5</h3>
+            <p className="mb-6 text-lg">Correct: {correct}/5 (Need 3+ to pass)</p>
+            <div className="text-6xl mb-8 font-bold p-6 bg-blue-50 rounded-lg">
+              {problems[currentProblem].a} {problems[currentProblem].op} {problems[currentProblem].b} = ?
+            </div>
+            <input
+              type="number"
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              className="px-6 py-4 text-3xl text-center mb-6 w-64 rounded-lg"
+              onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+              autoFocus
+              placeholder="?"
+            />
+            <br />
+            <button
+              onClick={handleSubmit}
+              className="px-8 py-4 bg-blue-600 text-white rounded-lg text-xl"
+            >
+              Submit Answer
+            </button>
+          </div>
+        );
+      };
+
+      const ReactionGame = ({ onComplete }) => {
+        const [score, setScore] = useState(0);
+        const [targetPos, setTargetPos] = useState({ x: 50, y: 50 });
+        const [timeLeft, setTimeLeft] = useState(15);
+        const [started, setStarted] = useState(false);
+        const [gameEnded, setGameEnded] = useState(false);
+
+        useEffect(() => {
+          if (!started || gameEnded) return;
+          
+          const timer = setInterval(() => {
+            setTimeLeft(t => {
+              if (t <= 1) {
+                clearInterval(timer);
+                setGameEnded(true);
+                return 0;
+              }
+              return t - 1;
+            });
+          }, 1000);
+
+          return () => clearInterval(timer);
+        }, [started, gameEnded]);
+
+        useEffect(() => {
+          if (gameEnded) {
+            setTimeout(() => {
+              onComplete(score >= 15);
+            }, 100);
+          }
+        }, [gameEnded, score]);
+
+        const handleStart = () => {
+          setStarted(true);
+        };
+
+        const handleClick = () => {
+          if (gameEnded) return;
+          setScore(score + 1);
+          setTargetPos({
+            x: Math.random() * 75 + 10,
+            y: Math.random() * 65 + 10
+          });
+        };
+
+        if (!started) {
+          return (
+            <div className="text-center">
+              <h3 className="text-2xl font-bold mb-4">REACTION TEST</h3>
+              <p className="text-lg mb-6">Click the tool 15 times in 15 seconds!</p>
+              <button
+                onClick={handleStart}
+                className="px-8 py-4 bg-green-600 text-white rounded-lg text-xl"
+              >
+                START GAME
+              </button>
+            </div>
+          );
+        }
+
+        return (
+          <div className="text-center">
+            <h3 className="text-2xl font-bold mb-4">REACTION TEST</h3>
+            <p className="text-2xl font-bold mb-4">Score: {score}/15 | Time: {timeLeft}s</p>
+            {gameEnded && (
+              <p className="text-xl font-bold mb-4 text-red-600">TIME'S UP!</p>
+            )}
+            <div className="relative w-full h-96 bg-slate-200 rounded-lg border-4 border-black">
+              {!gameEnded && (
+                <button
+                  onClick={handleClick}
+                  className="absolute text-5xl minigame-button hover:scale-110"
+                  style={{
+                    left: `${targetPos.x}%`,
+                    top: `${targetPos.y}%`,
+                    transform: 'translate(-50%, -50%)'
+                  }}
+                >
+                  🔧
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      };
+
+      // Render start screen
+      if (!gameStarted) {
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-purple-600 via-pink-600 to-red-600 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl p-12 max-w-2xl w-full shadow-xl">
+              <h1 className="text-5xl font-bold text-center mb-6 bg-gradient-to-r from-purple-600 to-pink-600 text-transparent bg-clip-text">
+                ADULT LIFE SIMULATOR
+              </h1>
+              <p className="text-center text-slate-600 mb-8 text-lg">
+                Build your wealth, make strategic moves, and become PRESIDENT!
+              </p>
+              
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-slate-700">
+                    ENTER YOUR NAME
+                  </label>
+                  <input
+                    type="text"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Your name..."
+                    className="w-full px-6 py-4 text-lg rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                    onKeyPress={(e) => e.key === 'Enter' && startGame()}
+                  />
+                </div>
+                
+                <button
+                  onClick={startGame}
+                  disabled={!playerName.trim()}
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white px-8 py-4 rounded-lg text-xl font-bold hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  START YOUR LIFE
+                </button>
+              </div>
+
+              <div className="mt-8 p-6 bg-slate-100 rounded-lg">
+                <h3 className="font-bold mb-3 text-slate-800">FEATURES:</h3>
+                <ul className="text-sm text-slate-700 space-y-2">
+                  <li>🎓 College & Military service</li>
+                  <li>📈 Stock market trading</li>
+                  <li>🏦 Robbery & crime</li>
+                  <li>🏖️ Vacations to reduce stress</li>
+                  <li>🎮 Mini-games for classes</li>
+                  <li>🏛️ Become PRESIDENT at $1 million!</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // Mini-game overlay
+      if (miniGame && miniGame.active) {
+        return (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-auto">
+              {miniGame.gameType === 'memory' && <MemoryGame onComplete={completeMiniGame} />}
+              {miniGame.gameType === 'sequence' && <SequenceGame onComplete={completeMiniGame} />}
+              {miniGame.gameType === 'math' && <MathGame onComplete={completeMiniGame} />}
+              {miniGame.gameType === 'reaction' && <ReactionGame onComplete={completeMiniGame} />}
+            </div>
+          </div>
+        );
+      }
+
+      // Calculate portfolio value
+      const portfolioValue = Object.entries(player.portfolio).reduce((total, [ticker, shares]) => {
+        const stock = stocks.find(s => s.ticker === ticker);
+        return total + (stock ? stock.price * shares : 0);
+      }, 0);
+
+      // Main game UI
+      return (
+        <div className="min-h-screen bg-slate-900 p-6">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-3xl p-6 mb-6 shadow-xl">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-white mb-2">
+                  {player.isPresident && '🏛️ President '}
+                  {player.name}'s Life
+                </h1>
+                <p className="text-white/80">Age: {player.age} | Year {player.year}, Month {player.month + 1}</p>
+                {player.canRunForPresident && !player.isPresident && (
+                  <p className="text-yellow-200 font-bold mt-2 animate-pulse">
+                    🎊 YOU CAN RUN FOR PRESIDENT! Check the President tab!
+                  </p>
+                )}
+                {player.inJail && (
+                  <p className="text-red-200 font-bold mt-2">🚔 IN JAIL - {player.jailMonthsRemaining} months remaining</p>
+                )}
+                {player.onVacation && (
+                  <p className="text-green-200 font-bold mt-2">🏖️ ON VACATION - {player.vacationMonthsRemaining} months remaining</p>
+                )}
+              </div>
+              <div className="text-right">
+                <div className="text-4xl font-bold text-white">{formatMoney(player.money)}</div>
+                <div className="text-white/80 text-sm">
+                  {player.job ? `${player.job}` : 'Unemployed'}
+                </div>
+                {portfolioValue > 0 && (
+                  <div className="text-white/80 text-sm">
+                    Portfolio: {formatMoney(portfolioValue)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Stats Bar */}
+          <div className="grid grid-cols-5 gap-4 mb-6">
+            <div className="bg-white rounded-lg p-4">
+              <div className="text-xs text-slate-600 mb-2">HEALTH</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-slate-200 rounded-full h-3">
+                  <div 
+                    className="bg-green-500 h-full rounded-full transition-all stat-fill"
+                    style={{ width: `${player.health}%` }}
+                  />
+                </div>
+                <span className="text-sm font-bold">{Math.round(player.health)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-4">
+              <div className="text-xs text-slate-600 mb-2">HAPPINESS</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-slate-200 rounded-full h-3">
+                  <div 
+                    className="bg-yellow-500 h-full rounded-full transition-all stat-fill"
+                    style={{ width: `${player.happiness}%` }}
+                  />
+                </div>
+                <span className="text-sm font-bold">{Math.round(player.happiness)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-4">
+              <div className="text-xs text-slate-600 mb-2">STRESS</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-slate-200 rounded-full h-3">
+                  <div 
+                    className="bg-red-500 h-full rounded-full transition-all stat-fill"
+                    style={{ width: `${player.stress}%` }}
+                  />
+                </div>
+                <span className="text-sm font-bold">{Math.round(player.stress)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-4">
+              <div className="text-xs text-slate-600 mb-2">CREDIT SCORE</div>
+              <div className="text-2xl font-bold">{player.creditScore}</div>
+            </div>
+
+            <div className="bg-white rounded-lg p-4">
+              <div className="text-xs text-slate-600 mb-2">NET WORTH</div>
+              <div className="text-lg font-bold">{formatMoney(player.money + portfolioValue)}</div>
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <div className="flex gap-2 mb-6 flex-wrap">
+            {['overview', player.isPresident || player.canRunForPresident ? 'president' : null, 'stocks', 'military', 'college', 'jobs', 'health', 'shopping', 'crime', 'classes', 'finances'].filter(Boolean).map(screen => (
+              <button
+                key={screen}
+                onClick={() => setCurrentScreen(screen)}
+                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                  currentScreen === screen
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-white text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {screen === 'president' && '🏛️ '}
+                {screen.charAt(0).toUpperCase() + screen.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Main Content */}
+          <div className="bg-white rounded-2xl p-8 min-h-[600px]">
+            {currentScreen === 'president' && (
+              <div>
+                <h2 className="text-3xl font-bold mb-6">🏛️ Presidential Campaign</h2>
+                
+                {!player.isPresident && player.canRunForPresident && (
+                  <div>
+                    <div className="bg-gradient-to-r from-blue-600 to-red-600 text-white rounded-lg p-8 mb-6">
+                      <h3 className="text-2xl font-bold mb-4">🎊 CONGRATULATIONS!</h3>
+                      <p className="text-lg mb-4">
+                        You've reached $1 million! You now have the wealth and influence to run for President of the United States!
+                      </p>
+                      <p className="text-sm opacity-90">
+                        Campaign costs: $500,000
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={runForPresident}
+                      disabled={player.money < 500000}
+                      className="w-full px-8 py-6 bg-gradient-to-r from-blue-600 to-red-600 text-white rounded-lg text-2xl font-bold hover:from-blue-700 hover:to-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {player.money >= 500000 ? 'RUN FOR PRESIDENT!' : `Need ${formatMoney(500000 - player.money)} more`}
+                    </button>
+                  </div>
+                )}
+
+                {player.isPresident && (
+                  <div>
+                    <div className="bg-gradient-to-r from-blue-600 to-red-600 text-white rounded-lg p-6 mb-6">
+                      <h3 className="text-2xl font-bold">🏛️ Presidential Powers</h3>
+                      <p className="text-sm opacity-90 mt-2">
+                        As President, you have special powers and responsibilities. Use them wisely!
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="border-2 border-blue-500 rounded-lg p-6 hover:border-blue-700 transition-all">
+                        <h4 className="text-xl font-bold mb-2">💰 Tax Cuts</h4>
+                        <p className="text-sm text-slate-600 mb-4">
+                          Lower taxes for everyone. Increases popularity.
+                        </p>
+                        <button
+                          onClick={() => presidentialAction('tax_cut')}
+                          className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                        >
+                          Implement Tax Cuts
+                        </button>
+                      </div>
+
+                      <div className="border-2 border-red-500 rounded-lg p-6 hover:border-red-700 transition-all">
+                        <h4 className="text-xl font-bold mb-2">⚔️ Declare War</h4>
+                        <p className="text-sm text-slate-600 mb-4">
+                          Start a military conflict. Costs $100,000.
+                        </p>
+                        <button
+                          onClick={() => presidentialAction('declare_war')}
+                          className="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700"
+                        >
+                          Declare War
+                        </button>
+                      </div>
+
+                      <div className="border-2 border-green-500 rounded-lg p-6 hover:border-green-700 transition-all">
+                        <h4 className="text-xl font-bold mb-2">🏗️ Infrastructure</h4>
+                        <p className="text-sm text-slate-600 mb-4">
+                          Build roads and bridges. Costs $250,000. Boosts happiness.
+                        </p>
+                        <button
+                          onClick={() => presidentialAction('infrastructure')}
+                          disabled={player.money < 250000}
+                          className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-slate-300"
+                        >
+                          Pass Infrastructure Bill
+                        </button>
+                      </div>
+
+                      <div className="border-2 border-purple-500 rounded-lg p-6 hover:border-purple-700 transition-all">
+                        <h4 className="text-xl font-bold mb-2">🎖️ Presidential Pardon</h4>
+                        <p className="text-sm text-slate-600 mb-4">
+                          Pardon yourself of all crimes!
+                        </p>
+                        <button
+                          onClick={() => presidentialAction('pardon')}
+                          disabled={!player.hasFelony}
+                          className="w-full px-4 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:bg-slate-300"
+                        >
+                          {player.hasFelony ? 'Pardon Yourself' : 'No Crimes to Pardon'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentScreen === 'stocks' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">📈 Stock Market</h2>
+                
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+                  <h3 className="text-lg font-semibold mb-2">Your Portfolio</h3>
+                  <div className="text-3xl font-bold text-blue-600 mb-2">{formatMoney(portfolioValue)}</div>
+                  {Object.keys(player.portfolio).length === 0 && (
+                    <p className="text-sm text-slate-600">No stocks yet. Buy some below!</p>
+                  )}
+                  {Object.entries(player.portfolio).map(([ticker, shares]) => {
+                    if (shares === 0) return null;
+                    const stock = stocks.find(s => s.ticker === ticker);
+                    return (
+                      <div key={ticker} className="flex justify-between text-sm py-1">
+                        <span>{ticker}: {shares} shares</span>
+                        <span className="font-semibold">{formatMoney(stock.price * shares)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="grid gap-4">
+                  {stocks.map(stock => {
+                    const owned = player.portfolio[stock.ticker] || 0;
+
+                    return (
+                      <div key={stock.ticker} className="border-2 rounded-lg p-6 hover:border-green-500 transition-all">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h3 className="text-xl font-bold">{stock.ticker}</h3>
+                            <p className="text-sm text-slate-600">{stock.name}</p>
+                            <p className="text-xs text-slate-500 mt-1">Owned: {owned} shares</p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-green-600">
+                              {formatMoney(stock.price)}
+                            </div>
+                            <div className="text-xs text-slate-600">per share</div>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <button
+                            onClick={() => buyStock(stock.ticker, 1)}
+                            disabled={player.money < stock.price}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-slate-300"
+                          >
+                            Buy 1 ({formatMoney(stock.price)})
+                          </button>
+                          
+                          <button
+                            onClick={() => buyStock(stock.ticker, 10)}
+                            disabled={player.money < stock.price * 10}
+                            className="px-4 py-2 bg-green-700 text-white rounded-lg font-semibold hover:bg-green-800 disabled:bg-slate-300"
+                          >
+                            Buy 10 ({formatMoney(stock.price * 10)})
+                          </button>
+
+                          <button
+                            onClick={() => sellStock(stock.ticker, 1)}
+                            disabled={owned < 1}
+                            className="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:bg-slate-300"
+                          >
+                            Sell 1 ({formatMoney(stock.price)})
+                          </button>
+                          
+                          <button
+                            onClick={() => sellStock(stock.ticker, 10)}
+                            disabled={owned < 10}
+                            className="px-4 py-2 bg-red-700 text-white rounded-lg font-semibold hover:bg-red-800 disabled:bg-slate-300"
+                          >
+                            Sell 10 ({formatMoney(stock.price * 10)})
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {currentScreen === 'crime' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6 text-red-600">⚖️ Criminal Activities</h2>
+                
+                <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 mb-6">
+                  <h3 className="text-lg font-bold text-red-800 mb-2">⚠️ WARNING</h3>
+                  <p className="text-sm text-red-700">
+                    Criminal activities are risky! You can gain money but might face fines, jail time, and a criminal record.
+                    Having a felony makes it harder to get hired.
+                  </p>
+                </div>
+
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold mb-4">🏦 Robbery</h3>
+                  <div className="grid gap-4">
+                    {ROBBERIES.map((robbery, idx) => (
+                      <div key={idx} className="border-2 border-orange-400 rounded-lg p-6 hover:border-orange-600 transition-all">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h4 className="text-lg font-bold">{robbery.name}</h4>
+                            <p className="text-sm text-slate-600">
+                              Success Rate: {Math.round(robbery.successRate * 100)}%
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-bold text-green-600">+{formatMoney(robbery.reward)}</div>
+                            <div className="text-xs text-slate-600">if successful</div>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-red-50 rounded p-3 mb-4 text-sm">
+                          <p className="text-red-700">
+                            <strong>If caught:</strong> {formatMoney(robbery.fine)} fine + {robbery.jailTime} months jail
+                          </p>
+                        </div>
+                        
+                        <button
+                          onClick={() => commitRobbery(robbery)}
+                          className="w-full px-4 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700"
+                        >
+                          Attempt Robbery
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold mb-4">💸 Tax Evasion</h3>
+                  {!player.dodgingIRS ? (
+                    <div className="border-2 border-red-500 rounded-lg p-6">
+                      <p className="mb-4">
+                        Stop paying taxes and keep all your income! But the IRS will accumulate debt with penalties,
+                        and your chances of getting caught increase every month.
+                      </p>
+                      <button
+                        onClick={dodgeIRS}
+                        className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700"
+                      >
+                        Start Dodging IRS
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-yellow-50 border-2 border-yellow-500 rounded-lg p-6">
+                      <p className="font-bold text-yellow-800 mb-2">Currently Evading Taxes</p>
+                      <p className="text-sm text-yellow-700 mb-2">
+                        Months since evasion: {player.monthsSinceTaxEvasion}<br/>
+                        Accumulated IRS debt: {formatMoney(player.irsDebtAccumulated)}<br/>
+                        Chance of getting caught: {Math.round(Math.min(0.05 + (player.monthsSinceTaxEvasion * 0.01), 0.5) * 100)}%
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="text-xl font-bold mb-4">🚨 White Collar Crimes</h3>
+                  <div className="grid gap-4">
+                    {FELONIES.map((felony, idx) => (
+                      <div key={idx} className="border-2 border-red-400 rounded-lg p-6 hover:border-red-600 transition-all">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h4 className="text-lg font-bold">{felony.name}</h4>
+                            <p className="text-sm text-slate-600">
+                              Success Rate: {Math.round(felony.successRate * 100)}%
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-bold text-green-600">+{formatMoney(felony.reward)}</div>
+                            <div className="text-xs text-slate-600">if successful</div>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-red-50 rounded p-3 mb-4 text-sm">
+                          <p className="text-red-700">
+                            <strong>If caught:</strong> {formatMoney(felony.fine)} fine + {felony.jailTime} months jail
+                          </p>
+                        </div>
+                        
+                        <button
+                          onClick={() => commitFelony(felony)}
+                          className="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700"
+                        >
+                          Attempt {felony.name}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentScreen === 'military' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">🪖 Military Service</h2>
+                
+                {player.inMilitary && (
+                  <div className="bg-green-50 border-2 border-green-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold mb-2">Currently Serving: {player.militaryBranch}</h3>
+                    <div className="w-full bg-slate-200 rounded-full h-6 mb-2">
+                      <div 
+                        className="bg-green-500 h-full rounded-full flex items-center justify-center text-white text-sm font-bold"
+                        style={{ width: `${(player.militaryProgress / MILITARY_BRANCHES.find(b => b.name === player.militaryBranch).duration) * 100}%` }}
+                      >
+                        {Math.round((player.militaryProgress / MILITARY_BRANCHES.find(b => b.name === player.militaryBranch).duration) * 100)}%
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-600">
+                      {player.militaryProgress} / {MILITARY_BRANCHES.find(b => b.name === player.militaryBranch).duration} months completed
+                    </p>
+                  </div>
+                )}
+
+                {player.hasMilitaryService && !player.inMilitary && (
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold">🎖️ Honorably Discharged Veteran</h3>
+                    <p className="text-sm text-slate-600 mt-2">
+                      You have access to GI Bill benefits! Your college tuition is fully covered.
+                      You also get preference when applying for jobs.
+                    </p>
+                  </div>
+                )}
+
+                {!player.inMilitary && !player.hasMilitaryService && (
+                  <div>
+                    <p className="text-slate-600 mb-6">
+                      Join the military to receive a signing bonus, monthly salary, free housing and food, healthcare, and the GI Bill for free college!
+                      Requires 70+ health to enlist.
+                    </p>
+
+                    <div className="grid gap-4">
+                      {MILITARY_BRANCHES.map(branch => (
+                        <div key={branch.name} className="border-2 rounded-lg p-6 hover:border-green-600 transition-all">
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <h3 className="text-xl font-bold">{branch.name}</h3>
+                              <p className="text-sm text-slate-600">
+                                {branch.duration} month contract | {branch.benefits}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-2xl font-bold text-green-600">{formatMoney(branch.salary)}/mo</div>
+                              <div className="text-sm text-slate-600">+ {formatMoney(branch.signing_bonus)} bonus</div>
+                            </div>
+                          </div>
+                          
+                          <div className="bg-green-50 rounded p-3 mb-4 text-sm">
+                            <p className="text-green-700">
+                              <strong>Benefits:</strong> Free housing, free meals, healthcare, GI Bill (free college)
+                            </p>
+                          </div>
+                          
+                          <button
+                            onClick={() => joinMilitary(branch.name)}
+                            disabled={player.health < 70}
+                            className="w-full px-4 py-3 bg-green-700 text-white rounded-lg font-semibold hover:bg-green-800 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                          >
+                            {player.health >= 70 ? 'Enlist Now' : `Need 70+ Health (Currently ${Math.round(player.health)})`}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentScreen === 'health' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">🏖️ Health & Vacation</h2>
+                
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+                  <h3 className="text-lg font-semibold mb-3">Current Health Status</h3>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <div className="text-3xl font-bold text-green-600">{Math.round(player.health)}</div>
+                      <div className="text-sm text-slate-600">Health</div>
+                    </div>
+                    <div>
+                      <div className="text-3xl font-bold text-red-600">{Math.round(player.stress)}</div>
+                      <div className="text-sm text-slate-600">Stress</div>
+                    </div>
+                    <div>
+                      <div className="text-3xl font-bold text-yellow-600">{Math.round(player.happiness)}</div>
+                      <div className="text-sm text-slate-600">Happiness</div>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-slate-600 mb-6">
+                  Take a vacation to reduce stress, increase happiness, and improve your health! 
+                  You won't work or pay bills while on vacation.
+                </p>
+
+                <div className="grid gap-4">
+                  {VACATIONS.map((vacation, idx) => (
+                    <div key={idx} className="border-2 rounded-lg p-6 hover:border-blue-500 transition-all">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold">{vacation.name}</h3>
+                          <p className="text-sm text-slate-600">
+                            Duration: {vacation.duration} month{vacation.duration > 1 ? 's' : ''}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-blue-600">{formatMoney(vacation.cost)}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-blue-50 rounded p-3 mb-4 text-sm">
+                        <p className="text-blue-700">
+                          <strong>Effects:</strong> 
+                          {vacation.stress < 0 && ` Stress ${vacation.stress}`}
+                          {vacation.happiness > 0 && ` | Happiness +${vacation.happiness}`}
+                          {vacation.health > 0 && ` | Health +${vacation.health}`}
+                        </p>
+                      </div>
+                      
+                      <button
+                        onClick={() => takeVacation(vacation)}
+                        disabled={player.money < vacation.cost || player.onVacation}
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                      >
+                        {player.onVacation ? 'Already on vacation' : player.money >= vacation.cost ? 'Book Vacation' : 'Not enough money'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {currentScreen === 'college' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">College Education</h2>
+                
+                {player.inCollege && (
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold mb-2">Currently Studying: {player.collegeMajor}</h3>
+                    <div className="w-full bg-slate-200 rounded-full h-6 mb-2">
+                      <div 
+                        className="bg-blue-500 h-full rounded-full flex items-center justify-center text-white text-sm font-bold"
+                        style={{ width: `${(player.collegeProgress / COLLEGE_MAJORS.find(m => m.name === player.collegeMajor).duration) * 100}%` }}
+                      >
+                        {Math.round((player.collegeProgress / COLLEGE_MAJORS.find(m => m.name === player.collegeMajor).duration) * 100)}%
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-600">
+                      {player.collegeProgress} / {COLLEGE_MAJORS.find(m => m.name === player.collegeMajor).duration} months completed
+                    </p>
+                  </div>
+                )}
+
+                {player.hasCollegeDegree && !player.inCollege && (
+                  <div className="bg-green-50 border-2 border-green-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold">🎓 You have a {player.collegeMajor} degree!</h3>
+                    <p className="text-sm text-slate-600 mt-2">
+                      This gives you access to higher-paying jobs and a salary boost of {((COLLEGE_MAJORS.find(m => m.name === player.collegeMajor)?.salaryBoost || 1) * 100 - 100).toFixed(0)}%
+                    </p>
+                  </div>
+                )}
+
+                {!player.inCollege && !player.hasCollegeDegree && (
+                  <div>
+                    {player.hasFelony && (
+                      <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4 mb-6">
+                        <p className="font-semibold text-red-800">
+                          ⚠️ You cannot enroll in college with a felony record!
+                        </p>
+                      </div>
+                    )}
+                    
+                    {player.hasGIBill && !player.hasFelony && (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4 mb-6">
+                        <p className="font-semibold text-green-800">
+                          🎖️ Your GI Bill will cover 100% of tuition! No student loans needed.
+                        </p>
+                      </div>
+                    )}
+                    
+                    <p className="text-slate-600 mb-6">
+                      Enroll in college to unlock better career opportunities! 
+                      {!player.hasGIBill && !player.hasFelony && ' You\'ll need $5,000 down payment and will take out student loans for the rest.'}
+                    </p>
+
+                    <div className="grid gap-4">
+                      {COLLEGE_MAJORS.map(major => (
+                        <div key={major.name} className="border-2 rounded-lg p-6 hover:border-purple-500 transition-all">
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <h3 className="text-xl font-bold">{major.name}</h3>
+                              <p className="text-sm text-slate-600">
+                                Duration: {major.duration} months | Salary Boost: +{((major.salaryBoost - 1) * 100).toFixed(0)}%
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-2xl font-bold text-purple-600">
+                                {player.hasGIBill ? 'FREE' : formatMoney(major.cost)}
+                              </div>
+                              <div className="text-sm text-slate-600">
+                                {player.hasGIBill ? 'GI Bill' : 'Total Cost'}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => enrollInCollege(major.name)}
+                            disabled={player.hasFelony || (!player.hasGIBill && player.money < 5000)}
+                            className="w-full px-4 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                          >
+                            {player.hasFelony ? 'Felons Cannot Enroll' : player.hasGIBill ? 'Enroll Now (FREE)' : player.money >= 5000 ? 'Enroll Now' : 'Need $5,000 Down Payment'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentScreen === 'jobs' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">Job Listings</h2>
+                
+                {player.job && (
+                  <div className="bg-green-50 border-2 border-green-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold">Current Job: {player.job}</h3>
+                    <p className="text-sm text-slate-600">
+                      {formatMoney(player.hourlyWage)}/hour × {player.hoursPerWeek} hours/week = {formatMoney(player.hourlyWage * player.hoursPerWeek * 4.33)}/month
+                    </p>
+                  </div>
+                )}
+
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold mb-2">Available Positions</h3>
+                  <p className="text-sm text-slate-600">
+                    Applications are not guaranteed. 
+                    {player.hasMilitaryService && ' Veterans get +15% acceptance boost!'}
+                    {player.hasFelony && ' Felony record reduces chances by 30%.'}
+                  </p>
+                </div>
+
+                <div className="grid gap-4">
+                  {JOB_LISTINGS.map((job, idx) => {
+                    let acceptance = job.acceptanceRate;
+                    if (player.hasCollegeDegree && job.major === player.collegeMajor) {
+                      acceptance += 0.2;
+                    }
+                    if (player.hasMilitaryService) {
+                      acceptance += 0.15;
+                    }
+                    if (player.hasFelony) {
+                      acceptance -= 0.3;
+                    }
+                    acceptance = Math.max(0, Math.min(1, acceptance));
+
+                    let displayWage = job.hourlyWage;
+                    if (player.hasCollegeDegree && job.requiresDegree) {
+                      const major = COLLEGE_MAJORS.find(m => m.name === player.collegeMajor);
+                      if (major) displayWage *= major.salaryBoost;
+                    }
+
+                    return (
+                      <div key={idx} className="border-2 rounded-lg p-6 hover:border-blue-500 transition-all">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h3 className="text-xl font-bold">{job.title}</h3>
+                            <p className="text-sm text-slate-600">
+                              {job.hoursPerWeek} hours/week
+                              {job.requiresDegree && ` | Requires ${job.major} degree`}
+                            </p>
+                            <p className="text-sm text-green-600 mt-1">
+                              Acceptance Rate: {Math.round(acceptance * 100)}%
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-green-600">{formatMoney(displayWage)}/hr</div>
+                            <div className="text-sm text-slate-600">
+                              ~{formatMoney(displayWage * job.hoursPerWeek * 4.33)}/mo
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <button
+                          onClick={() => applyForJob(job)}
+                          disabled={job.requiresDegree && !player.hasCollegeDegree}
+                          className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                        >
+                          {job.requiresDegree && !player.hasCollegeDegree ? 'Degree Required' : 'Apply Now'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {currentScreen === 'shopping' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">Shopping</h2>
+                
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold mb-4">🚗 Cars</h3>
+                  {player.car && (
+                    <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4 mb-4">
+                      <p className="font-semibold">You own: {player.car}</p>
+                      <p className="text-sm text-slate-600">Monthly maintenance: {formatMoney(player.transportCost)}</p>
+                    </div>
+                  )}
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    {CARS.map((car, idx) => (
+                      <div key={idx} className="border-2 rounded-lg p-4 hover:border-blue-500 transition-all">
+                        <h4 className="font-bold mb-1">{car.name}</h4>
+                        <p className="text-sm text-slate-600 mb-2">
+                          Maintenance: {formatMoney(car.maintenanceCost)}/month
+                        </p>
+                        <div className="flex justify-between items-center">
+                          <span className="text-lg font-bold text-green-600">{formatMoney(car.price)}</span>
+                          <button
+                            onClick={() => buyCar(car)}
+                            disabled={player.money < car.price}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                          >
+                            Buy
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xl font-bold mb-4">🏠 Housing</h3>
+                  {player.house && (
+                    <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4 mb-4">
+                      <p className="font-semibold">You live in: {player.house}</p>
+                      <p className="text-sm text-slate-600">Monthly payment: {formatMoney(player.housePayment + player.rentCost)}</p>
+                    </div>
+                  )}
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    {HOUSES.map((house, idx) => (
+                      <div key={idx} className="border-2 rounded-lg p-4 hover:border-purple-500 transition-all">
+                        <h4 className="font-bold mb-1">{house.name}</h4>
+                        <p className="text-sm text-slate-600 mb-2">
+                          {house.type === 'rent' ? 'Monthly Rent' : `Down Payment (20%): ${formatMoney(house.price * 0.2)}`}
+                        </p>
+                        <div className="flex justify-between items-center">
+                          <span className="text-lg font-bold text-purple-600">
+                            {house.type === 'rent' ? `${formatMoney(house.price)}/mo` : formatMoney(house.price)}
+                          </span>
+                          <button
+                            onClick={() => buyHouse(house)}
+                            disabled={house.type === 'buy' && player.money < house.price * 0.2}
+                            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                          >
+                            {house.type === 'rent' ? 'Rent' : 'Buy'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentScreen === 'classes' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">📚 Educational Classes</h2>
+                
+                {player.currentClass && (
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold mb-2">Currently Taking: {player.currentClass}</h3>
+                    <div className="w-full bg-slate-200 rounded-full h-6 mb-2">
+                      <div 
+                        className="bg-blue-500 h-full rounded-full flex items-center justify-center text-white text-sm font-bold"
+                        style={{ width: `${(player.classProgress / CLASSES[player.currentClass].duration) * 100}%` }}
+                      >
+                        {Math.round((player.classProgress / CLASSES[player.currentClass].duration) * 100)}%
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-600">
+                      {player.classProgress} / {CLASSES[player.currentClass].duration} months completed
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-slate-600 mb-6">
+                  Take classes to learn valuable life skills! Each class has a mini-game - pass it to complete the class!
+                </p>
+
+                <div className="grid gap-4">
+                  {Object.entries(CLASSES).map(([name, classData]) => {
+                    const hasCompleted = 
+                      (classData.benefit === 'tax_knowledge' && player.taxKnowledge) ||
+                      (classData.benefit === 'cooking_skill' && player.cookingSkill > 0) ||
+                      (classData.benefit === 'finance_knowledge' && player.financeKnowledge) ||
+                      (classData.benefit === 'handyman_skill' && player.handymanSkill);
+
+                    return (
+                      <div key={name} className="border-2 rounded-lg p-6 hover:border-green-500 transition-all">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h3 className="text-xl font-bold">{name}</h3>
+                            <p className="text-sm text-slate-600">{classData.description}</p>
+                            <p className="text-sm text-blue-600 mt-2">
+                              Mini-Game: {classData.gameType === 'memory' && '🧠 Memory Test'}
+                              {classData.gameType === 'sequence' && '🍳 Sequence Challenge'}
+                              {classData.gameType === 'math' && '🔢 Math Problems'}
+                              {classData.gameType === 'reaction' && '⚡ Reaction Speed'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-purple-600">{formatMoney(classData.cost)}</div>
+                          </div>
+                        </div>
+                        
+                        {hasCompleted ? (
+                          <div className="w-full px-4 py-3 bg-green-100 text-green-800 rounded-lg font-semibold text-center">
+                            ✓ Completed
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => takeClass(name)}
+                            disabled={player.money < classData.cost || player.currentClass}
+                            className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                          >
+                            {player.currentClass ? 'Already in a class' : player.money >= classData.cost ? 'Enroll & Play Mini-Game' : 'Not enough money'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-8 bg-blue-50 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold mb-3">Class Benefits</h3>
+                  <ul className="space-y-2 text-sm text-slate-700">
+                    <li>💡 <strong>Tax Preparation:</strong> Understanding of tax deductions</li>
+                    <li>💡 <strong>Cooking Basics:</strong> Reduces monthly food costs by $50</li>
+                    <li>💡 <strong>Personal Finance:</strong> Better money management knowledge</li>
+                    <li>💡 <strong>Home Maintenance:</strong> Reduces house maintenance by $50/month</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {currentScreen === 'finances' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">💰 Finances & Taxes</h2>
+                
+                <div className="grid grid-cols-2 gap-6 mb-6">
+                  <div className="bg-slate-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-4">Account Summary</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Current Balance:</span>
+                        <span className={`font-bold ${player.money >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatMoney(player.money)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Stock Portfolio:</span>
+                        <span className="font-semibold">{formatMoney(portfolioValue)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>401(k) Retirement:</span>
+                        <span className="font-semibold">{formatMoney(player.retirement401k)}</span>
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span className="font-bold">Net Worth:</span>
+                        <span className="font-bold text-green-600">{formatMoney(player.money + portfolioValue + player.retirement401k)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Credit Score:</span>
+                        <span className="font-bold">{player.creditScore}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-4">Tax Status</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>YTD Income:</span>
+                        <span className="font-semibold">{formatMoney(player.yearToDateIncome)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Taxes Paid:</span>
+                        <span className="font-semibold">{formatMoney(player.taxesPaid)}</span>
+                      </div>
+                      {player.dodgingIRS && (
+                        <div className="flex justify-between">
+                          <span className="text-red-600">IRS Debt:</span>
+                          <span className="font-bold text-red-600">{formatMoney(player.irsDebtAccumulated)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {player.job && (
+                  <div className="bg-slate-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-4">Monthly Paycheck Breakdown</h3>
+                    {(() => {
+                      const grossMonthly = player.hourlyWage * player.hoursPerWeek * 4.33;
+                      const annualGross = grossMonthly * 12;
+                      const federalTax = calculateFederalTax(annualGross) / 12;
+                      const stateTax = calculateStateTax(annualGross) / 12;
+                      const socialSecurity = calculateSocialSecurity(annualGross) / 12;
+                      const medicare = calculateMedicare(annualGross) / 12;
+
+                      return (
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span>Gross Pay:</span>
+                            <span className="font-semibold">{formatMoney(grossMonthly)}</span>
+                          </div>
+                          {!player.dodgingIRS && (
+                            <>
+                              <div className="flex justify-between text-red-600">
+                                <span>- Federal Tax:</span>
+                                <span>-{formatMoney(federalTax)}</span>
+                              </div>
+                              <div className="flex justify-between text-red-600">
+                                <span>- State Tax:</span>
+                                <span>-{formatMoney(stateTax)}</span>
+                              </div>
+                              <div className="flex justify-between text-red-600">
+                                <span>- Social Security:</span>
+                                <span>-{formatMoney(socialSecurity)}</span>
+                              </div>
+                              <div className="flex justify-between text-red-600">
+                                <span>- Medicare:</span>
+                                <span>-{formatMoney(medicare)}</span>
+                              </div>
+                            </>
+                          )}
+                          <div className="flex justify-between border-t pt-2 text-lg">
+                            <span className="font-bold">Net Pay:</span>
+                            <span className="font-bold text-green-600">
+                              {formatMoney(player.dodgingIRS ? grossMonthly : grossMonthly - federalTax - stateTax - socialSecurity - medicare)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {currentScreen === 'overview' && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6">Life Overview</h2>
+                {/* Same as before */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div className="bg-slate-50 rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Career & Status</h3>
+                      <p className="text-sm">
+                        {player.isPresident && '🏛️ PRESIDENT OF THE UNITED STATES'}
+                        {!player.isPresident && player.job && `💼 ${player.job}`}
+                        {!player.isPresident && !player.job && 'Unemployed'}
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Net Worth</h3>
+                      <div className="text-2xl font-bold text-green-600">
+                        {formatMoney(player.money + portfolioValue)}
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Cash: {formatMoney(player.money)}<br/>
+                        Stocks: {formatMoney(portfolioValue)}
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Possessions</h3>
+                      <p className="text-sm">
+                        🚗 {player.car || 'No car'}<br/>
+                        🏠 {player.house || 'Homeless'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="bg-slate-50 rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Monthly Expenses</h3>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span>Housing:</span>
+                          <span>{formatMoney(player.rentCost + player.housePayment)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Food:</span>
+                          <span>{formatMoney(player.foodCost)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Utilities:</span>
+                          <span>{formatMoney(player.utilitiesCost)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Transport:</span>
+                          <span>{formatMoney(player.transportCost)}</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-1 font-bold">
+                          <span>Total:</span>
+                          <span>{formatMoney(player.rentCost + player.housePayment + player.foodCost + player.utilitiesCost + player.transportCost)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-lg p-4">
+                      <h3 className="font-semibold mb-2">Debts</h3>
+                      <div className="text-sm space-y-1">
+                        {player.studentLoanDebt > 0 && (
+                          <div className="flex justify-between">
+                            <span>Student Loans:</span>
+                            <span className="text-red-600">{formatMoney(player.studentLoanDebt)}</span>
+                          </div>
+                        )}
+                        {player.dodgingIRS && (
+                          <div className="flex justify-between">
+                            <span>IRS Debt:</span>
+                            <span className="text-red-600">{formatMoney(player.irsDebtAccumulated)}</span>
+                          </div>
+                        )}
+                        {player.studentLoanDebt === 0 && !player.dodgingIRS && (
+                          <p className="text-green-600">No debts! 🎉</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Notifications */}
+          <div className="fixed top-20 right-6 space-y-2 z-50 max-w-sm">
+            {notifications.map(notif => (
+              <div
+                key={notif.id}
+                className={`notification bg-slate-900 text-white px-6 py-4 rounded-lg shadow-xl ${
+                  notif.type === 'urgent' ? 'urgent border-2 border-red-500' : ''
+                }`}
+              >
+                {notif.message}
+              </div>
+            ))}
+          </div>
+
+          {/* Game Speed Controls */}
+          <div className="fixed bottom-6 right-6 bg-white rounded-lg shadow-xl p-4 border-2 border-slate-200">
+            <div className="text-sm text-slate-600 mb-2">Game Speed</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setGameSpeed(0)}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  gameSpeed === 0 ? 'bg-red-500 text-white' : 'bg-slate-100'
+                }`}
+              >
+                Pause
+              </button>
+              <button
+                onClick={() => setGameSpeed(1)}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  gameSpeed === 1 ? 'bg-blue-500 text-white' : 'bg-slate-100'
+                }`}
+              >
+                1x
+              </button>
+              <button
+                onClick={() => setGameSpeed(2)}
+                className={`px-4 py-2 rounded-lg font-semibold ${
+                  gameSpeed === 2 ? 'bg-green-500 text-white' : 'bg-slate-100'
+                }`}
+              >
+                2x
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<AdultLifeSimulator />, document.getElementById('root'));
+  </script>
+</body>
+</html>
